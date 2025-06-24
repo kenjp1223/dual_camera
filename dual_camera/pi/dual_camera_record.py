@@ -1,43 +1,62 @@
 import cv2
 import argparse
+import os
 import time
 from datetime import datetime
 
+# ---- Arguments ----
 parser = argparse.ArgumentParser(description='Dual USB Camera Recorder')
-parser.add_argument('--duration', type=int, default=300, help='Recording duration in seconds')
-parser.add_argument('--fps', type=int, default=100, help='Frames per second')
+parser.add_argument('--duration', type=int, default=60, help='Duration in seconds')
+parser.add_argument('--fps', type=int, default=30, help='Target FPS')
+parser.add_argument('--width', type=int, default=640, help='Frame width')
+parser.add_argument('--height', type=int, default=480, help='Frame height')
+parser.add_argument('--output_dir', type=str, default='/home/pi/captures', help='Output directory')
 args = parser.parse_args()
 
-duration = args.duration
-fps = args.fps
+frame_target = args.fps * args.duration
+timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+save_dir = os.path.join(args.output_dir, f'record_{timestamp}')
+os.makedirs(save_dir, exist_ok=True)
 
-# Open both cameras (assume /dev/video0 and /dev/video1)
+# ---- Initialize Cameras ----
 cap0 = cv2.VideoCapture(0)
 cap1 = cv2.VideoCapture(1)
 
-cap0.set(cv2.CAP_PROP_FPS, fps)
-cap1.set(cv2.CAP_PROP_FPS, fps)
+cap0.set(cv2.CAP_PROP_FRAME_WIDTH, args.width)
+cap0.set(cv2.CAP_PROP_FRAME_HEIGHT, args.height)
+cap1.set(cv2.CAP_PROP_FRAME_WIDTH, args.width)
+cap1.set(cv2.CAP_PROP_FRAME_HEIGHT, args.height)
 
-width = int(cap0.get(cv2.CAP_PROP_FRAME_WIDTH))
-height = int(cap0.get(cv2.CAP_PROP_FRAME_HEIGHT))
+print(f"Recording {frame_target} frames at {args.width}x{args.height}")
 
-fourcc = cv2.VideoWriter_fourcc(*'XVID')
-timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-out0 = cv2.VideoWriter(f'camera0_{timestamp}.avi', fourcc, fps, (width, height))
-out1 = cv2.VideoWriter(f'camera1_{timestamp}.avi', fourcc, fps, (width, height))
+# ---- Record Frames ----
+frame_idx0 = 0
+frame_idx1 = 0
 
 start_time = time.time()
-while time.time() - start_time < duration:
+
+while max(frame_idx0, frame_idx1) < frame_target:
     ret0, frame0 = cap0.read()
     ret1, frame1 = cap1.read()
+    
     if ret0:
-        out0.write(frame0)
+        cv2.imwrite(os.path.join(save_dir, f"cam0_{frame_idx0:05d}.jpg"), frame0)
+        frame_idx0 += 1
     if ret1:
-        out1.write(frame1)
-    # Sleep to maintain fps
-    time.sleep(1.0 / fps)
+        cv2.imwrite(os.path.join(save_dir, f"cam1_{frame_idx1:05d}.jpg"), frame1)
+        frame_idx1 += 1
+
+end_time = time.time()
+elapsed = end_time - start_time
+avg_fps0 = frame_idx0 / elapsed
+avg_fps1 = frame_idx1 / elapsed
+
+# ---- Summary ----
+print(f"Finished recording.")
+print(f"cam0: {frame_idx0} frames at {avg_fps0:.2f} fps")
+print(f"cam1: {frame_idx1} frames at {avg_fps1:.2f} fps")
+print(f"Elapsed time: {elapsed:.2f} seconds")
+
 
 cap0.release()
 cap1.release()
-out0.release()
-out1.release() 

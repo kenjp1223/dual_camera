@@ -1,137 +1,185 @@
-# Dual Camera Animal Behavior Recording System
+# Dual Camera Raspberry Pi Setup (multi-device ready)
 
-## Overview
-This project enables remote video recording of animal behavior using multiple Raspberry Pis, each with two USB cameras, controlled from a central PC. The PC can trigger recordings, set parameters, and monitor status for each Pi. An optional GUI is provided for ease of use.
-
----
-
-## Folder Structure
-```
-dual_camera/
-  pi/
-    camera_server.py         # REST API server for Pi
-    dual_camera_record.py    # Dual camera video recording script
-  pc/
-    controller.py            # CLI controller for PC
-    gui.py                   # GUI controller for PC
-```
+This guide describes how to set up and control multiple Raspberry Pi devices (e.g., `xxlab1`, `xxlab2`, etc.) for synchronized dual USB camera recording using `ffmpeg`. Recording is triggered remotely from a host PC over Ethernet or Wi-Fi.
 
 ---
 
-## Requirements
-- **Raspberry Pi:**
-  - Python 3
-  - `opencv-python` (`pip install opencv-python`)
-  - `flask` (`pip install flask`)
-- **PC:**
-  - Python 3
-  - `requests` (`pip install requests`)
-  - `tkinter` (usually included with Python)
+## 1. Initial Raspberry Pi Setup (Per Device)
 
----
+### ✅ Flash OS and Enable SSH
 
-## Installing Python Environments and Packages on Raspberry Pi
+* Use **Raspberry Pi Imager** to flash Raspberry Pi OS Lite (64-bit).
+* In advanced options:
 
-1. **Update your system:**
-   ```bash
-   sudo apt update
-   sudo apt upgrade
-   ```
-2. **Install Python 3 and pip (if not already installed):**
-   ```bash
-   sudo apt install python3 python3-pip
-   ```
-3. **(Recommended) Create a virtual environment:**
-   This keeps your project dependencies isolated.
-   ```bash
-   sudo apt install python3-venv
-   python3 -m venv dualcam-env
-   source dualcam-env/bin/activate
-   ```
-   - To deactivate:
-     ```bash
-     deactivate
-     ```
-4. **Install required Python packages:**
-   From within your (activated) environment:
-   ```bash
-   pip install flask opencv-python
-   ```
-   - If you get errors with `opencv-python`, try:
-     ```bash
-     pip install opencv-contrib-python
-     ```
-   - For some Pi models, you may need to install system dependencies:
-     ```bash
-     sudo apt install libatlas-base-dev libjasper-dev libqtgui4 python3-pyqt5 libqt4-test
-     ```
-5. **(Optional) List all dependencies in a requirements file:**
-   Create a `requirements.txt`:
-   ```
-   flask
-   opencv-python
-   ```
-   Then install with:
-   ```bash
-   pip install -r requirements.txt
-   ```
+  * Set hostname (e.g., `xxlab1`, `xxlab2`, ...)
+  * Enable SSH
+  * Configure Wi-Fi (SSID, password)
+  * Set locale/timezone
 
----
+### ✅ Assign Static IP Over Ethernet
 
-## Setup
-### On Each Raspberry Pi
-1. Connect two USB cameras.
-2. Copy the `pi/` folder to the Pi.
-3. Install dependencies:
-   ```bash
-   pip install flask opencv-python
-   ```
-4. Start the camera server:
-   ```bash
-   python3 camera_server.py
-   ```
-   - The server listens on port 5000 by default.
+Edit the file:
 
-### On the PC
-1. Copy the `pc/` folder to your PC.
-2. Install dependencies:
-   ```bash
-   pip install requests
-   ```
-   - `tkinter` is usually included with Python. If not, install it via your OS package manager.
-3. Edit the `PI_CONFIG` list in `controller.py` and `gui.py` to match your Pi IP addresses.
-
----
-
-## Usage
-### Command Line Controller
-Run from the `pc/` directory:
 ```bash
-python controller.py
+sudo nano /etc/dhcpcd.conf
 ```
-- Follow prompts to select a Pi, set duration/fps, and start/stop recording.
 
-### GUI Controller
-Run from the `pc/` directory:
+Append (change IP for each Pi):
+
+```ini
+interface eth0
+static ip_address=192.168.2.11/24  # Use 192.168.2.12, .13, etc. for other Pis
+static domain_name_servers=8.8.8.8 1.1.1.1
+```
+
+Do **not** include `static routers=` if you want to keep internet through Wi-Fi.
+
+Then reboot:
+
 ```bash
-python gui.py
+sudo reboot
 ```
-- Use the dropdown to select a Pi, set parameters, and control recording with buttons.
 
 ---
 
-## Workflow
-1. Start the server on each Pi.
-2. Use the PC controller (CLI or GUI) to:
-   - Select a Pi
-   - Set recording parameters
-   - Start/stop recording
-   - Check status
-3. Videos are saved on the Pi SD card as `camera0_*.avi` and `camera1_*.avi`.
+## 2. Environment Setup (Per Pi)
+
+### ✅ Install Dependencies
+
+```bash
+sudo apt update && sudo apt install git python3-venv ffmpeg -y
+```
+
+### ✅ Clone Your Repository
+
+```bash
+git clone https://github.com/kenjp1223/dual_camera.git
+cd dual_camera/dual_camera/pi
+```
+
+### ✅ Create and Activate Python Virtual Environment
+
+```bash
+python3 -m venv dualcam-venv
+source dualcam-venv/bin/activate
+```
+
+### ✅ Install Python Dependencies
+
+```bash
+pip install flask
+```
+
+Or export and use:
+
+```bash
+#pip freeze > requirements.txt
+pip install -r requirements.txt
+```
 
 ---
 
-## Notes
-- Ensure the PC and all Pis are on the same network.
-- The video preview feature is not yet implemented.
-- For troubleshooting, check the debug/info/error messages in the CLI or GUI. 
+## 3. Running the Recording Script Manually
+
+### ✅ Test Recording
+
+```bash
+cd /home/stuberlab1/dual_camera/dual_camera/pi
+source dualcam-venv/bin/activate
+
+python3 dual_camera_ffmpeg_record.py \
+  --duration 10 \
+  --fps 100 \
+  --width 640 \
+  --height 480 \
+  --output_dir /home/stuberlab1/captures
+```
+
+Check that `cam0.mp4` and `cam1.mp4` exist and are similar in frame count and duration.
+
+To debug camera devices:
+
+```bash
+v4l2-ctl --list-devices
+```
+
+---
+
+## 4. Running Flask Server (Trigger from PC)
+
+### ✅ Start the Server on Pi
+
+```bash
+cd /home/stuberlab1/dual_camera/dual_camera/pi
+source dualcam-venv/bin/activate
+python3 camera_server.py
+```
+
+Look for:
+
+```
+Running on http://192.168.2.11:5000
+```
+
+### ✅ Trigger Recording from PC
+
+#### PowerShell (Windows):
+
+```powershell
+curl -X POST http://192.168.2.11:5000/start_recording ^
+  -H "Content-Type: application/json" ^
+  -d "{\"duration\": 10, \"fps\": 100, \"width\": 640, \"height\": 480}"
+```
+
+#### Linux/macOS/WSL:
+
+```bash
+curl -X POST http://192.168.2.11:5000/start_recording \
+  -H "Content-Type: application/json" \
+  -d '{"duration": 10, "fps": 100, "width": 640, "height": 480}'
+```
+
+---
+
+## 5. Optional: Autostart Script
+
+Create a launcher script:
+
+```bash
+nano start_camera_server.sh
+```
+
+```bash
+#!/bin/bash
+cd /home/stuberlab1/dual_camera/dual_camera/pi
+source dualcam-venv/bin/activate
+python3 camera_server.py
+```
+
+Make executable:
+
+```bash
+chmod +x start_camera_server.sh
+```
+
+---
+
+## ✅ Done
+
+You now have a multi-device recording system where each Pi:
+
+* Has a unique name and static IP
+* Can be triggered remotely over Ethernet or Wi-Fi
+* Records synced dual-camera video to local storage
+
+Feel free to extend with:
+
+* Auto-start with systemd
+* Real-time status feedback
+* Parallel multi-Pi trigger script from the PC
+
+PRs and suggestions welcome!
+
+
+Kentaro Ishii (University of Washington)
+ken1223@uw.edu
