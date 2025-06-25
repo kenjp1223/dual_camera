@@ -12,7 +12,10 @@ def build_ffmpeg_command(device, output_path, width, height, fps, frames):
         "-video_size", f"{width}x{height}",
         "-framerate", str(fps),
         "-i", device,
-        "-vcodec", "copy",
+        "-filter:v", f"fps={fps}",               # Resample to target fps
+        "-vcodec", "libx264",                    # Compress using H.264
+        "-preset", "ultrafast",                  # Fast encoding, larger files
+        "-crf", "23",                            # Constant Rate Factor: 0–51 (lower is better)
         "-frames:v", str(frames),
         output_path
     ]

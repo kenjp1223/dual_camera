@@ -84,9 +84,8 @@ pip install -r requirements.txt
 ### ✅ Test Recording
 
 ```bash
-cd /home/stuberlab1/dual_camera/dual_camera/pi
 source dualcam-venv/bin/activate
-
+cd /home/stuberlab1/dual_camera/dual_camera/pi
 python3 dual_camera_ffmpeg_record.py \
   --duration 10 \
   --fps 100 \
@@ -110,8 +109,8 @@ v4l2-ctl --list-devices
 ### ✅ Start the Server on Pi
 
 ```bash
-cd /home/stuberlab1/dual_camera/dual_camera/pi
 source dualcam-venv/bin/activate
+cd /home/stuberlab1/dual_camera/dual_camera/pi
 python3 camera_server.py
 ```
 
