@@ -1,0 +1,3 @@
+requests
+Pillow
+# tkinter is included with standard Python installations on Windows and most systems 

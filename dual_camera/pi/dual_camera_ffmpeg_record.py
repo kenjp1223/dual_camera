@@ -26,11 +26,12 @@ def main():
     parser.add_argument('--output_dir', type=str, default='/home/pi/captures')
     parser.add_argument('--cam0', type=str, default='/dev/video0')
     parser.add_argument('--cam1', type=str, default='/dev/video2')
+    parser.add_argument('--subject', type=str, default='default', help='Subject name for folder naming')
     args = parser.parse_args()
 
     frame_count = args.duration * args.fps
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    save_dir = os.path.join(args.output_dir, f'record_{timestamp}')
+    save_dir = os.path.join(args.output_dir, f'record_{args.subject}_{timestamp}')
     os.makedirs(save_dir, exist_ok=True)
 
     cam0_out = os.path.join(save_dir, "cam0.mp4")
@@ -40,6 +41,7 @@ def main():
     cmd1 = build_ffmpeg_command(args.cam1, cam1_out, args.width, args.height, args.fps, frame_count)
 
     print(f"Recording {frame_count} frames at {args.fps} FPS for {args.duration} seconds")
+    print(f"Subject: {args.subject}")
     print("Output directory:", save_dir)
 
     start_time = time.time()

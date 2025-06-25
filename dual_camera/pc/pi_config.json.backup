@@ -1,0 +1,7 @@
+[
+  {
+    "name": "Pi-stuberlab1",
+    "host": "http://192.168.2.11:5000",
+    "username": "stuberlab1",
+    "discovered": true,
+    "cam0_label": 

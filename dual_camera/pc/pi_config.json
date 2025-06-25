@@ -1,0 +1,16 @@
+[
+  {
+    "name": "Pi-stuberlab1",
+    "host": "http://192.168.2.11:5000",
+    "username": "stuberlab1",
+    "discovered": true,
+    "output_dir": "/home/stuberlab1/captures",
+    "cam0": "/dev/video0",
+    "cam1": "/dev/video2",
+    "duration": "0",
+    "fps": "100",
+    "subject": "test",
+    "width": "800",
+    "height": "600"
+  }
+]
