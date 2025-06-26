@@ -94,20 +94,23 @@ def build_ffmpeg_command(device, output_path, width, height, fps, frames, sync_m
     return cmd
 
 def synchronized_recording(cmd0, cmd1, frame_count, fps, duration):
-    """Start both cameras with precise synchronization and trigger LED indicator."""
+    """Start both cameras with precise synchronization and trigger LED indicator with buffer time."""
     # Create a barrier for synchronization
     start_barrier = threading.Barrier(2)
     processes = []
-    led_on = threading.Event()
+
+    def led_buffer_thread(duration):
+        print("[DEBUG] LED buffer thread started.")
+        time.sleep(1)
+        set_led(True)
+        print("[DEBUG] LED ON (after 1s buffer)")
+        time.sleep(max(0, duration - 2))
+        set_led(False)
+        print("[DEBUG] LED OFF (1s before end)")
 
     def run_camera(cmd, camera_name):
         try:
             start_barrier.wait()
-            # Turn on LED after both cameras are triggered
-            if HAS_GPIO and not led_on.is_set():
-                print("[DEBUG] Turning LED ON after camera trigger.")
-                set_led(True)
-                led_on.set()
             print(f"Starting {camera_name} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')}")
             process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             processes.append((process, camera_name))
@@ -115,16 +118,17 @@ def synchronized_recording(cmd0, cmd1, frame_count, fps, duration):
             print(f"{camera_name} finished at {datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')}")
         except Exception as e:
             print(f"Error in {camera_name}: {e}")
-
     # GPIO setup
     if HAS_GPIO:
         print(f"[DEBUG] Setting up GPIO{LED_PIN} for LED output.")
         GPIO.setmode(GPIO.BCM)
         GPIO.setup(LED_PIN, GPIO.OUT)
         set_led(False)
+        print("[DEBUG] Starting LED buffer thread.")
+        led_thread = threading.Thread(target=led_buffer_thread, args=(duration,))
+        led_thread.start()
     else:
         print("[DEBUG] GPIO not available, skipping LED setup.")
-
     # Start both cameras in separate threads
     thread0 = threading.Thread(target=run_camera, args=(cmd0, "cam0"))
     thread1 = threading.Thread(target=run_camera, args=(cmd1, "cam1"))
@@ -132,15 +136,14 @@ def synchronized_recording(cmd0, cmd1, frame_count, fps, duration):
     thread1.start()
     thread0.join()
     thread1.join()
-
-    # Turn off LED after both cameras finish
+    # Wait for LED thread to finish and cleanup
     if HAS_GPIO:
+        led_thread.join()
         print("[DEBUG] Turning LED OFF after recording finished.")
         set_led(False)
         GPIO.cleanup()
     else:
         print("[DEBUG] GPIO not available, skipping LED cleanup.")
-
     return processes
 
 def get_first_last_frame_timestamps(video_path):
