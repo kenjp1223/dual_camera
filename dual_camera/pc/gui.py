@@ -246,9 +246,15 @@ class PiTab:
         btn_row2.pack(fill='x', padx=5, pady=5)
         
         ttk.Button(btn_row2, text='Detect Cameras', command=self.detect_cameras).grid(row=0, column=0, padx=2)
-        ttk.Button(btn_row2, text='Save Config', command=self.save_config).grid(row=0, column=1, padx=2)
-        ttk.Button(btn_row2, text='Edit Pi', command=self.edit_pi).grid(row=0, column=2, padx=2)
-        ttk.Button(btn_row2, text='Remove Pi', command=self.remove_pi).grid(row=0, column=3, padx=2)
+        ttk.Button(btn_row2, text='Post Process', command=self.post_process).grid(row=0, column=1, padx=2)
+        ttk.Button(btn_row2, text='Save Config', command=self.save_config).grid(row=0, column=2, padx=2)
+        ttk.Button(btn_row2, text='Edit Pi', command=self.edit_pi).grid(row=0, column=3, padx=2)
+        
+        # Third row of buttons
+        btn_row3 = ttk.Frame(button_frame)
+        btn_row3.pack(fill='x', padx=5, pady=5)
+        
+        ttk.Button(btn_row3, text='Remove Pi', command=self.remove_pi).grid(row=0, column=0, padx=2)
     
     def setup_snapshots(self, parent):
         snapshot_frame = ttk.LabelFrame(parent, text="Camera Snapshots")
@@ -290,6 +296,10 @@ class PiTab:
     
     def remove_pi(self):
         self.gui.remove_pi(self.pi_index)
+
+    def post_process(self):
+        """Open post-processing dialog for this Pi"""
+        self.gui.post_process_videos(self.pi_index)
 
 class PiControllerGUI:
     def __init__(self, root):
@@ -723,6 +733,329 @@ class PiControllerGUI:
             messagebox.showinfo('Status', f"{resp.json()}")
         except Exception as e:
             messagebox.showerror('Status', str(e))
+
+    def post_process_videos(self, idx):
+        """Post-process videos for a specific Pi"""
+        pi = self.pis[idx]
+        
+        # Create post-processing dialog
+        dialog = tk.Toplevel(self.root)
+        dialog.title(f"Post Process Videos - {pi.get('name', 'Pi')}")
+        dialog.geometry("700x600")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        # Get recording folders from Pi
+        def get_recording_folders():
+            try:
+                # Use the output directory from Pi config
+                output_dir = pi.get('output_dir', f'/home/{pi.get("username", "pi")}/captures')
+                
+                # For now, we'll show a file dialog to select the folder
+                # In the future, we could fetch the folder list from the Pi
+                folder = filedialog.askdirectory(
+                    title=f"Select recording folder for {pi.get('name', 'Pi')}",
+                    initialdir=output_dir
+                )
+                return folder
+            except Exception as e:
+                messagebox.showerror("Error", f"Could not access recording folders: {e}")
+                return None
+        
+        # Folder selection
+        folder_frame = ttk.LabelFrame(dialog, text="Recording Folder")
+        folder_frame.pack(fill='x', padx=10, pady=10)
+        
+        folder_var = tk.StringVar()
+        ttk.Label(folder_frame, text="Selected folder:").pack(anchor='w', padx=5, pady=5)
+        
+        folder_entry_frame = ttk.Frame(folder_frame)
+        folder_entry_frame.pack(fill='x', padx=5, pady=5)
+        
+        folder_entry = ttk.Entry(folder_entry_frame, textvariable=folder_var, width=50)
+        folder_entry.pack(side='left', fill='x', expand=True)
+        
+        def browse_folder():
+            folder = filedialog.askdirectory(title="Select recording folder")
+            if folder:
+                folder_var.set(folder)
+        
+        ttk.Button(folder_entry_frame, text="Browse", command=browse_folder).pack(side='right', padx=(5, 0))
+        
+        # Processing options
+        options_frame = ttk.LabelFrame(dialog, text="Processing Options")
+        options_frame.pack(fill='x', padx=10, pady=10)
+        
+        # Layout selection
+        layout_frame = ttk.Frame(options_frame)
+        layout_frame.pack(fill='x', padx=5, pady=5)
+        
+        ttk.Label(layout_frame, text="Layout:").grid(row=0, column=0, sticky='w')
+        layout_var = tk.StringVar(value='vertical')
+        ttk.Radiobutton(layout_frame, text="Vertical (cam0 on top, cam1 on bottom)", 
+                       variable=layout_var, value='vertical').grid(row=0, column=1, sticky='w', padx=10)
+        ttk.Radiobutton(layout_frame, text="Horizontal (cam0 left, cam1 right)", 
+                       variable=layout_var, value='horizontal').grid(row=1, column=1, sticky='w', padx=10)
+        
+        # Rotation controls
+        rotation_frame = ttk.Frame(options_frame)
+        rotation_frame.pack(fill='x', padx=5, pady=5)
+        
+        ttk.Label(rotation_frame, text="Camera Rotation:").grid(row=0, column=0, sticky='w')
+        
+        # Cam0 rotation
+        cam0_rot_frame = ttk.Frame(rotation_frame)
+        cam0_rot_frame.grid(row=1, column=0, sticky='w', padx=20, pady=2)
+        ttk.Label(cam0_rot_frame, text="Cam0:").pack(side='left')
+        cam0_rotation_var = tk.StringVar(value='0')
+        cam0_rot_combo = ttk.Combobox(cam0_rot_frame, textvariable=cam0_rotation_var, 
+                                     values=['0', '90', '180', '270'], width=8, state='readonly')
+        cam0_rot_combo.pack(side='left', padx=5)
+        ttk.Label(cam0_rot_frame, text="degrees").pack(side='left')
+        
+        # Cam1 rotation
+        cam1_rot_frame = ttk.Frame(rotation_frame)
+        cam1_rot_frame.grid(row=2, column=0, sticky='w', padx=20, pady=2)
+        ttk.Label(cam1_rot_frame, text="Cam1:").pack(side='left')
+        cam1_rotation_var = tk.StringVar(value='0')
+        cam1_rot_combo = ttk.Combobox(cam1_rot_frame, textvariable=cam1_rotation_var, 
+                                     values=['0', '90', '180', '270'], width=8, state='readonly')
+        cam1_rot_combo.pack(side='left', padx=5)
+        ttk.Label(cam1_rot_frame, text="degrees").pack(side='left')
+        
+        # Speed options
+        speed_frame = ttk.Frame(options_frame)
+        speed_frame.pack(fill='x', padx=5, pady=5)
+        
+        super_fast_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(speed_frame, text="Super Fast (Hardware Acceleration)", 
+                       variable=super_fast_var).grid(row=0, column=0, sticky='w', padx=10)
+        
+        # Output path
+        output_frame = ttk.Frame(options_frame)
+        output_frame.pack(fill='x', padx=5, pady=5)
+        
+        ttk.Label(output_frame, text="Output file:").grid(row=0, column=0, sticky='w')
+        output_var = tk.StringVar()
+        output_entry = ttk.Entry(output_frame, textvariable=output_var, width=40)
+        output_entry.grid(row=0, column=1, sticky='w', padx=5)
+        
+        def update_output_path():
+            folder = folder_var.get()
+            if folder:
+                folder_name = os.path.basename(folder)
+                layout = layout_var.get()
+                speed_suffix = "_superfast" if super_fast_var.get() else "_fast"
+                cam0_rot = cam0_rotation_var.get()
+                cam1_rot = cam1_rotation_var.get()
+                rotation_suffix = ""
+                if cam0_rot != '0' or cam1_rot != '0':
+                    rotation_suffix = f"_r{cam0_rot}_{cam1_rot}"
+                output_var.set(os.path.join(folder, f"{folder_name}_concatenated{speed_suffix}{rotation_suffix}_{layout}.mp4"))
+        
+        # Update output path when any parameter changes
+        folder_var.trace('w', lambda *args: update_output_path())
+        layout_var.trace('w', lambda *args: update_output_path())
+        super_fast_var.trace('w', lambda *args: update_output_path())
+        cam0_rotation_var.trace('w', lambda *args: update_output_path())
+        cam1_rotation_var.trace('w', lambda *args: update_output_path())
+        
+        # Progress and status
+        status_frame = ttk.LabelFrame(dialog, text="Status")
+        status_frame.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        status_text = tk.Text(status_frame, height=10, width=70)
+        status_text.pack(fill='both', expand=True, padx=5, pady=5)
+        
+        def log_message(message):
+            status_text.insert('end', message + '\n')
+            status_text.see('end')
+            dialog.update()
+        
+        # Preview function
+        def create_preview():
+            folder = folder_var.get()
+            if not folder:
+                messagebox.showerror("Error", "Please select a recording folder")
+                return
+            
+            if not os.path.exists(folder):
+                messagebox.showerror("Error", "Selected folder does not exist")
+                return
+            
+            # Check for video files
+            cam0_path = os.path.join(folder, "cam0.mp4")
+            cam1_path = os.path.join(folder, "cam1.mp4")
+            
+            if not os.path.exists(cam0_path) or not os.path.exists(cam1_path):
+                messagebox.showerror("Error", "cam0.mp4 and cam1.mp4 not found in selected folder")
+                return
+            
+            layout = layout_var.get()
+            cam0_rot = int(cam0_rotation_var.get())
+            cam1_rot = int(cam1_rotation_var.get())
+            
+            # Create preview filename
+            folder_name = os.path.basename(folder)
+            preview_path = os.path.join(folder, f"{folder_name}_preview_{layout}.jpg")
+            
+            log_message(f"Creating preview snapshot...")
+            log_message(f"Folder: {folder}")
+            log_message(f"Layout: {layout}")
+            log_message(f"Cam0 rotation: {cam0_rot}°")
+            log_message(f"Cam1 rotation: {cam1_rot}°")
+            log_message(f"Preview: {preview_path}")
+            
+            # Run preview creation in a separate thread
+            def preview_thread():
+                try:
+                    import subprocess
+                    import sys
+                    
+                    # Build command for the preview
+                    cmd = [
+                        sys.executable, "post_process_videos.py",
+                        folder,
+                        "--preview",
+                        "--layout", layout,
+                        "--cam0-rotation", str(cam0_rot),
+                        "--cam1-rotation", str(cam1_rot)
+                    ]
+                    
+                    log_message("Running preview command...")
+                    log_message(f"Command: {' '.join(cmd)}")
+                    
+                    # Run with real-time output
+                    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, 
+                                             universal_newlines=True, bufsize=1)
+                    
+                    # Show progress in real-time
+                    for line in process.stdout:
+                        log_message(line.strip())
+                    
+                    process.wait()
+                    
+                    if process.returncode == 0:
+                        log_message("Preview snapshot created successfully!")
+                        log_message(f"Preview file: {preview_path}")
+                        
+                        # Try to open the preview image
+                        try:
+                            if platform.system() == "Windows":
+                                os.startfile(preview_path)
+                            elif platform.system() == "Darwin":  # macOS
+                                subprocess.run(["open", preview_path])
+                            else:  # Linux
+                                subprocess.run(["xdg-open", preview_path])
+                            log_message("Preview image opened in default viewer")
+                        except Exception as e:
+                            log_message(f"Could not open preview automatically: {e}")
+                            log_message(f"Please open manually: {preview_path}")
+                        
+                        messagebox.showinfo("Success", f"Preview snapshot created!\nFile: {preview_path}")
+                    else:
+                        log_message(f"Error: Preview creation returned code {process.returncode}")
+                        messagebox.showerror("Error", f"Preview creation failed with return code {process.returncode}")
+                        
+                except Exception as e:
+                    log_message(f"Error during preview creation: {e}")
+                    messagebox.showerror("Error", f"Preview creation failed: {e}")
+            
+            thread = threading.Thread(target=preview_thread)
+            thread.daemon = True
+            thread.start()
+        
+        # Process function
+        def process_videos():
+            folder = folder_var.get()
+            if not folder:
+                messagebox.showerror("Error", "Please select a recording folder")
+                return
+            
+            if not os.path.exists(folder):
+                messagebox.showerror("Error", "Selected folder does not exist")
+                return
+            
+            # Check for video files
+            cam0_path = os.path.join(folder, "cam0.mp4")
+            cam1_path = os.path.join(folder, "cam1.mp4")
+            
+            if not os.path.exists(cam0_path) or not os.path.exists(cam1_path):
+                messagebox.showerror("Error", "cam0.mp4 and cam1.mp4 not found in selected folder")
+                return
+            
+            output_path = output_var.get()
+            layout = layout_var.get()
+            super_fast = super_fast_var.get()
+            cam0_rot = int(cam0_rotation_var.get())
+            cam1_rot = int(cam1_rotation_var.get())
+            
+            log_message(f"Starting fast post-processing...")
+            log_message(f"Folder: {folder}")
+            log_message(f"Layout: {layout}")
+            log_message(f"Cam0 rotation: {cam0_rot}°")
+            log_message(f"Cam1 rotation: {cam1_rot}°")
+            log_message(f"Super Fast: {super_fast}")
+            log_message(f"Output: {output_path}")
+            
+            # Run post-processing in a separate thread
+            def process_thread():
+                try:
+                    import subprocess
+                    import sys
+                    
+                    # Build command for the fast post-processing script
+                    cmd = [
+                        sys.executable, "post_process_videos.py",
+                        folder,
+                        "--output", output_path,
+                        "--layout", layout,
+                        "--cam0-rotation", str(cam0_rot),
+                        "--cam1-rotation", str(cam1_rot)
+                    ]
+                    
+                    # Add super-fast flag if selected
+                    if super_fast:
+                        cmd.append("--super-fast")
+                    
+                    log_message("Running fast post-processing command...")
+                    log_message(f"Command: {' '.join(cmd)}")
+                    
+                    # Run with real-time output
+                    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, 
+                                             universal_newlines=True, bufsize=1)
+                    
+                    # Show progress in real-time
+                    for line in process.stdout:
+                        log_message(line.strip())
+                    
+                    process.wait()
+                    
+                    if process.returncode == 0:
+                        log_message("Fast post-processing completed successfully!")
+                        log_message(f"Output file: {output_path}")
+                        messagebox.showinfo("Success", f"Fast post-processing completed!\nOutput: {output_path}")
+                    else:
+                        log_message(f"Error: Process returned code {process.returncode}")
+                        messagebox.showerror("Error", f"Post-processing failed with return code {process.returncode}")
+                        
+                except Exception as e:
+                    log_message(f"Error during processing: {e}")
+                    messagebox.showerror("Error", f"Post-processing failed: {e}")
+            
+            thread = threading.Thread(target=process_thread)
+            thread.daemon = True
+            thread.start()
+        
+        button_frame = ttk.Frame(dialog)
+        button_frame.pack(fill='x', padx=10, pady=10)
+        
+        ttk.Button(button_frame, text="Create Preview", command=create_preview).pack(side='left', padx=5)
+        ttk.Button(button_frame, text="Process Videos", command=process_videos).pack(side='left', padx=5)
+        ttk.Button(button_frame, text="Close", command=dialog.destroy).pack(side='right', padx=5)
+        
+        # Initialize output path
+        update_output_path()
 
 if __name__ == '__main__':
     root = tk.Tk()
