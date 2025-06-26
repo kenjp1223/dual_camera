@@ -2,7 +2,7 @@
 """
 Fast post-processing script for dual camera videos.
 Concatenates cam0.mp4 and cam1.mp4 into a side-by-side video using optimized ffmpeg settings.
-Supports rotation and preview snapshots.
+Supports rotation, preview snapshots, and frame synchronization.
 """
 
 import argparse
@@ -49,6 +49,264 @@ def get_video_info(video_path):
     except Exception as e:
         print(f"Error getting video info for {video_path}: {e}")
         return None, None, None, None, None
+
+def get_frame_count(video_path):
+    """Get exact frame count of a video"""
+    try:
+        cmd = [
+            'ffprobe', '-v', 'quiet', '-select_streams', 'v:0',
+            '-count_packets', '-show_entries', 'stream=nb_read_packets',
+            '-print_format', 'csv=p=0', video_path
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        return int(result.stdout.strip())
+    except Exception as e:
+        print(f"Error getting frame count for {video_path}: {e}")
+        return None
+
+def analyze_frame_sync(cam0_path, cam1_path):
+    """Analyze frame synchronization between two videos"""
+    print("Analyzing frame synchronization...")
+    
+    # Get frame counts
+    frames0 = get_frame_count(cam0_path)
+    frames1 = get_frame_count(cam1_path)
+    
+    if frames0 is None or frames1 is None:
+        print("Error: Could not get frame counts")
+        return None
+    
+    print(f"Frame counts - cam0: {frames0}, cam1: {frames1}")
+    
+    # Get video info
+    cam0_width, cam0_height, cam0_duration, cam0_fps, _ = get_video_info(cam0_path)
+    cam1_width, cam1_height, cam1_duration, cam1_fps, _ = get_video_info(cam1_path)
+    
+    print(f"Duration - cam0: {cam0_duration:.3f}s, cam1: {cam1_duration:.3f}s")
+    print(f"FPS - cam0: {cam0_fps:.2f}, cam1: {cam1_fps:.2f}")
+    
+    # Calculate differences
+    frame_diff = abs(frames0 - frames1)
+    duration_diff = abs(cam0_duration - cam1_duration)
+    
+    print(f"Frame difference: {frame_diff}")
+    print(f"Duration difference: {duration_diff:.3f}s")
+    
+    # Determine sync issues
+    sync_info = {
+        'frames0': frames0,
+        'frames1': frames1,
+        'frame_diff': frame_diff,
+        'duration0': cam0_duration,
+        'duration1': cam1_duration,
+        'duration_diff': duration_diff,
+        'fps0': cam0_fps,
+        'fps1': cam1_fps,
+        'has_sync_issues': frame_diff > 1 or duration_diff > 0.1
+    }
+    
+    if sync_info['has_sync_issues']:
+        print("⚠️  Frame synchronization issues detected!")
+        if frame_diff > 1:
+            print(f"   - Frame count mismatch: {frame_diff} frames")
+        if duration_diff > 0.1:
+            print(f"   - Duration mismatch: {duration_diff:.3f}s")
+    else:
+        print("✅ Videos appear to be well synchronized")
+    
+    return sync_info
+
+def create_synchronized_video(cam0_path, cam1_path, output_path, layout='vertical', 
+                            cam0_rotation=0, cam1_rotation=0, force_sync=False, target_frames=None):
+    """
+    Create synchronized concatenated video with optional frame alignment
+    """
+    try:
+        # Analyze synchronization
+        sync_info = analyze_frame_sync(cam0_path, cam1_path)
+        
+        if sync_info is None:
+            print("Error: Could not analyze video synchronization")
+            return False
+        
+        # If force_sync is enabled and there are sync issues, align frames
+        if force_sync and sync_info['has_sync_issues']:
+            print("Applying frame synchronization...")
+            
+            # Determine target frame count (use the shorter video)
+            if target_frames is None:
+                target_frames = min(sync_info['frames0'], sync_info['frames1'])
+            
+            print(f"Target frame count: {target_frames}")
+            
+            # Create temporary synchronized videos
+            temp_cam0 = cam0_path + ".sync_temp.mp4"
+            temp_cam1 = cam1_path + ".sync_temp.mp4"
+            
+            # Trim videos to target frame count
+            cmd0 = [
+                'ffmpeg', '-i', cam0_path,
+                '-vcodec', 'copy',
+                '-frames:v', str(target_frames),
+                '-y', temp_cam0
+            ]
+            
+            cmd1 = [
+                'ffmpeg', '-i', cam1_path,
+                '-vcodec', 'copy',
+                '-frames:v', str(target_frames),
+                '-y', temp_cam1
+            ]
+            
+            print("Creating synchronized versions...")
+            result0 = subprocess.run(cmd0, capture_output=True, text=True)
+            result1 = subprocess.run(cmd1, capture_output=True, text=True)
+            
+            if result0.returncode != 0 or result1.returncode != 0:
+                print("Error creating synchronized videos")
+                return False
+            
+            # Use synchronized videos for concatenation
+            cam0_path = temp_cam0
+            cam1_path = temp_cam1
+            
+            print("Frame synchronization applied successfully")
+        
+        # Get video info (may have changed after sync)
+        cam0_width, cam0_height, _, _, _ = get_video_info(cam0_path)
+        cam1_width, cam1_height, _, _, _ = get_video_info(cam1_path)
+        
+        if any(x is None for x in [cam0_width, cam0_height, cam1_width, cam1_height]):
+            print("Error: Could not get video dimensions")
+            return False
+        
+        # Apply rotations
+        cam0_rot_filter = ""
+        cam1_rot_filter = ""
+        
+        if cam0_rotation == 90:
+            cam0_rot_filter = "[0:v]transpose=1[v0_rot];"
+            cam0_width, cam0_height = cam0_height, cam0_width
+        elif cam0_rotation == 180:
+            cam0_rot_filter = "[0:v]transpose=1,transpose=1[v0_rot];"
+        elif cam0_rotation == 270:
+            cam0_rot_filter = "[0:v]transpose=2[v0_rot];"
+            cam0_width, cam0_height = cam0_height, cam0_width
+        else:
+            cam0_rot_filter = "[0:v]copy[v0_rot];"
+        
+        if cam1_rotation == 90:
+            cam1_rot_filter = "[1:v]transpose=1[v1_rot];"
+            cam1_width, cam1_height = cam1_height, cam1_width
+        elif cam1_rotation == 180:
+            cam1_rot_filter = "[1:v]transpose=1,transpose=1[v1_rot];"
+        elif cam1_rotation == 270:
+            cam1_rot_filter = "[1:v]transpose=2[v1_rot];"
+            cam1_width, cam1_height = cam1_height, cam1_width
+        else:
+            cam1_rot_filter = "[1:v]copy[v1_rot];"
+        
+        # Check if we can use copy mode
+        can_copy = (cam0_width == cam1_width and 
+                   cam0_height == cam1_height and
+                   cam0_rotation == 0 and cam1_rotation == 0 and
+                   not force_sync)  # Can't copy if we did frame sync
+        
+        if layout == 'vertical':
+            total_height = cam0_height + cam1_height
+            total_width = max(cam0_width, cam1_width)
+            
+            if can_copy:
+                print("Using fast copy mode (no re-encoding)...")
+                scale_filter = f"[0:v]scale={total_width}:{cam0_height}[v0];[1:v]scale={total_width}:{cam1_height}[v1]"
+                concat_filter = f"[v0][v1]vstack=inputs=2[v]"
+                
+                cmd = [
+                    'ffmpeg', '-i', cam0_path, '-i', cam1_path,
+                    '-filter_complex', f"{scale_filter};{concat_filter}",
+                    '-map', '[v]', '-map', '0:a?',
+                    '-c:v', 'copy',
+                    '-avoid_negative_ts', 'make_zero',
+                    '-y', output_path
+                ]
+            else:
+                print("Using optimized encoding mode...")
+                scale_filter = f"[v0_rot]scale={total_width}:{cam0_height}[v0_scaled];[v1_rot]scale={total_width}:{cam1_height}[v1_scaled]"
+                concat_filter = f"[v0_scaled][v1_scaled]vstack=inputs=2[v]"
+                
+                cmd = [
+                    'ffmpeg', '-i', cam0_path, '-i', cam1_path,
+                    '-filter_complex', f"{cam0_rot_filter}{cam1_rot_filter}{scale_filter};{concat_filter}",
+                    '-map', '[v]', '-map', '0:a?',
+                    '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23',
+                    '-threads', '0',
+                    '-y', output_path
+                ]
+        else:  # horizontal layout
+            total_width = cam0_width + cam1_width
+            total_height = max(cam0_height, cam1_height)
+            
+            if can_copy:
+                print("Using fast copy mode (no re-encoding)...")
+                scale_filter = f"[0:v]scale={cam0_width}:{total_height}[v0];[1:v]scale={cam1_width}:{total_height}[v1]"
+                concat_filter = f"[v0][v1]hstack=inputs=2[v]"
+                
+                cmd = [
+                    'ffmpeg', '-i', cam0_path, '-i', cam1_path,
+                    '-filter_complex', f"{scale_filter};{concat_filter}",
+                    '-map', '[v]', '-map', '0:a?',
+                    '-c:v', 'copy',
+                    '-avoid_negative_ts', 'make_zero',
+                    '-y', output_path
+                ]
+            else:
+                print("Using optimized encoding mode...")
+                scale_filter = f"[v0_rot]scale={cam0_width}:{total_height}[v0_scaled];[v1_rot]scale={cam1_width}:{total_height}[v1_scaled]"
+                concat_filter = f"[v0_scaled][v1_scaled]hstack=inputs=2[v]"
+                
+                cmd = [
+                    'ffmpeg', '-i', cam0_path, '-i', cam1_path,
+                    '-filter_complex', f"{cam0_rot_filter}{cam1_rot_filter}{scale_filter};{concat_filter}",
+                    '-map', '[v]', '-map', '0:a?',
+                    '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23',
+                    '-threads', '0',
+                    '-y', output_path
+                ]
+        
+        print(f"Creating concatenated video: {output_path}")
+        print(f"Output dimensions: {total_width}x{total_height}")
+        
+        # Run with progress output
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, 
+                                 universal_newlines=True, bufsize=1)
+        
+        # Show progress
+        for line in process.stdout:
+            if 'time=' in line:
+                print(f"\rProcessing: {line.strip()}", end='', flush=True)
+        
+        process.wait()
+        
+        if process.returncode == 0:
+            print(f"\nSuccessfully created: {output_path}")
+            
+            # Clean up temporary files if they were created
+            if force_sync and sync_info['has_sync_issues']:
+                try:
+                    os.remove(temp_cam0)
+                    os.remove(temp_cam1)
+                    print("Cleaned up temporary files")
+                except:
+                    pass
+            
+            return True
+        else:
+            print(f"\nError creating video (return code: {process.returncode})")
+            return False
+            
+    except Exception as e:
+        print(f"Error during video processing: {e}")
+        return False
 
 def create_preview_snapshot(cam0_path, cam1_path, output_path, layout='vertical', 
                           cam0_rotation=0, cam1_rotation=0):
@@ -133,144 +391,8 @@ def create_fast_concatenated_video(cam0_path, cam1_path, output_path, layout='ve
     """
     Create concatenated video using optimized ffmpeg settings for speed
     """
-    try:
-        # Get video info
-        cam0_width, cam0_height, cam0_duration, cam0_fps, cam0_codec = get_video_info(cam0_path)
-        cam1_width, cam1_height, cam1_duration, cam1_fps, cam1_codec = get_video_info(cam1_path)
-        
-        if any(x is None for x in [cam0_width, cam0_height, cam1_width, cam1_height]):
-            print("Error: Could not get video dimensions")
-            return False
-        
-        print(f"Cam0: {cam0_width}x{cam0_height}, {cam0_fps:.2f} fps, {cam0_codec}")
-        print(f"Cam1: {cam1_width}x{cam1_height}, {cam1_fps:.2f} fps, {cam1_codec}")
-        
-        # Apply rotations
-        cam0_rot_filter = ""
-        cam1_rot_filter = ""
-        
-        if cam0_rotation == 90:
-            cam0_rot_filter = "[0:v]transpose=1[v0_rot];"
-            cam0_width, cam0_height = cam0_height, cam0_width
-        elif cam0_rotation == 180:
-            cam0_rot_filter = "[0:v]transpose=1,transpose=1[v0_rot];"
-        elif cam0_rotation == 270:
-            cam0_rot_filter = "[0:v]transpose=2[v0_rot];"
-            cam0_width, cam0_height = cam0_height, cam0_width
-        else:
-            cam0_rot_filter = "[0:v]copy[v0_rot];"
-        
-        if cam1_rotation == 90:
-            cam1_rot_filter = "[1:v]transpose=1[v1_rot];"
-            cam1_width, cam1_height = cam1_height, cam1_width
-        elif cam1_rotation == 180:
-            cam1_rot_filter = "[1:v]transpose=1,transpose=1[v1_rot];"
-        elif cam1_rotation == 270:
-            cam1_rot_filter = "[1:v]transpose=2[v1_rot];"
-            cam1_width, cam1_height = cam1_height, cam1_width
-        else:
-            cam1_rot_filter = "[1:v]copy[v1_rot];"
-        
-        # Check if we can use copy mode (same codec and similar properties)
-        can_copy = (cam0_codec == cam1_codec and 
-                   abs(cam0_fps - cam1_fps) < 0.1 and
-                   cam0_width == cam1_width and 
-                   cam0_height == cam1_height and
-                   cam0_rotation == 0 and cam1_rotation == 0)  # Can't copy if rotating
-        
-        if layout == 'vertical':
-            # Vertical layout: cam0 on top, cam1 on bottom
-            total_height = cam0_height + cam1_height
-            total_width = max(cam0_width, cam1_width)
-            
-            if can_copy:
-                # Fast copy mode - no re-encoding
-                print("Using fast copy mode (no re-encoding)...")
-                scale_filter = f"[0:v]scale={total_width}:{cam0_height}[v0];[1:v]scale={total_width}:{cam1_height}[v1]"
-                concat_filter = f"[v0][v1]vstack=inputs=2[v]"
-                
-                cmd = [
-                    'ffmpeg', '-i', cam0_path, '-i', cam1_path,
-                    '-filter_complex', f"{scale_filter};{concat_filter}",
-                    '-map', '[v]', '-map', '0:a?',
-                    '-c:v', 'copy',  # Fast copy mode
-                    '-avoid_negative_ts', 'make_zero',
-                    '-y', output_path
-                ]
-            else:
-                # Need to re-encode for compatibility or rotation
-                print("Using optimized encoding mode...")
-                scale_filter = f"[v0_rot]scale={total_width}:{cam0_height}[v0_scaled];[v1_rot]scale={total_width}:{cam1_height}[v1_scaled]"
-                concat_filter = f"[v0_scaled][v1_scaled]vstack=inputs=2[v]"
-                
-                cmd = [
-                    'ffmpeg', '-i', cam0_path, '-i', cam1_path,
-                    '-filter_complex', f"{cam0_rot_filter}{cam1_rot_filter}{scale_filter};{concat_filter}",
-                    '-map', '[v]', '-map', '0:a?',
-                    '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23',  # Fast encoding
-                    '-threads', '0',  # Use all CPU cores
-                    '-y', output_path
-                ]
-            
-        else:  # horizontal layout
-            # Horizontal layout: cam0 on left, cam1 on right
-            total_width = cam0_width + cam1_width
-            total_height = max(cam0_height, cam1_height)
-            
-            if can_copy:
-                # Fast copy mode
-                print("Using fast copy mode (no re-encoding)...")
-                scale_filter = f"[0:v]scale={cam0_width}:{total_height}[v0];[1:v]scale={cam1_width}:{total_height}[v1]"
-                concat_filter = f"[v0][v1]hstack=inputs=2[v]"
-                
-                cmd = [
-                    'ffmpeg', '-i', cam0_path, '-i', cam1_path,
-                    '-filter_complex', f"{scale_filter};{concat_filter}",
-                    '-map', '[v]', '-map', '0:a?',
-                    '-c:v', 'copy',  # Fast copy mode
-                    '-avoid_negative_ts', 'make_zero',
-                    '-y', output_path
-                ]
-            else:
-                # Need to re-encode
-                print("Using optimized encoding mode...")
-                scale_filter = f"[v0_rot]scale={cam0_width}:{total_height}[v0_scaled];[v1_rot]scale={cam1_width}:{total_height}[v1_scaled]"
-                concat_filter = f"[v0_scaled][v1_scaled]hstack=inputs=2[v]"
-                
-                cmd = [
-                    'ffmpeg', '-i', cam0_path, '-i', cam1_path,
-                    '-filter_complex', f"{cam0_rot_filter}{cam1_rot_filter}{scale_filter};{concat_filter}",
-                    '-map', '[v]', '-map', '0:a?',
-                    '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23',  # Fast encoding
-                    '-threads', '0',  # Use all CPU cores
-                    '-y', output_path
-                ]
-        
-        print(f"Creating concatenated video: {output_path}")
-        print(f"Output dimensions: {total_width}x{total_height}")
-        print("Running optimized ffmpeg command...")
-        
-        # Run with progress output
-        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, 
-                                 universal_newlines=True, bufsize=1)
-        
-        # Show progress
-        for line in process.stdout:
-            if 'time=' in line:
-                print(f"\rProcessing: {line.strip()}", end='', flush=True)
-        
-        process.wait()
-        
-        if process.returncode == 0:
-            print(f"\nSuccessfully created: {output_path}")
-            return True
-        else:
-            print(f"\nError creating video (return code: {process.returncode})")
-            return False
-            
-    except Exception as e:
-        print(f"Error during video processing: {e}")
-        return False
+    return create_synchronized_video(cam0_path, cam1_path, output_path, layout, 
+                                   cam0_rotation, cam1_rotation, force_sync=False)
 
 def create_super_fast_version(cam0_path, cam1_path, output_path, layout='vertical', 
                             cam0_rotation=0, cam1_rotation=0):
@@ -370,7 +492,7 @@ def create_super_fast_version(cam0_path, cam1_path, output_path, layout='vertica
         return False
 
 def main():
-    parser = argparse.ArgumentParser(description="Fast concatenation of dual camera videos")
+    parser = argparse.ArgumentParser(description="Fast concatenation of dual camera videos with frame synchronization")
     parser.add_argument('folder', help='Folder containing cam0.mp4 and cam1.mp4')
     parser.add_argument('--output', '-o', help='Output video path (default: concatenated.mp4 in same folder)')
     parser.add_argument('--layout', choices=['vertical', 'horizontal'], default='vertical',
@@ -385,6 +507,12 @@ def main():
                        help='Rotation for cam0 in degrees (0, 90, 180, 270)')
     parser.add_argument('--cam1-rotation', type=int, choices=[0, 90, 180, 270], default=0,
                        help='Rotation for cam1 in degrees (0, 90, 180, 270)')
+    parser.add_argument('--force-sync', action='store_true',
+                       help='Force frame synchronization by trimming to shortest video')
+    parser.add_argument('--analyze-sync', action='store_true',
+                       help='Analyze frame synchronization without processing')
+    parser.add_argument('--target-frames', type=int,
+                       help='Target frame count for synchronization (default: use shortest video)')
     
     args = parser.parse_args()
     
@@ -414,6 +542,11 @@ def main():
     if not files_ok:
         sys.exit(1)
     
+    # Handle analyze-sync option
+    if args.analyze_sync:
+        analyze_frame_sync(cam0_path, cam1_path)
+        return
+    
     # Set output path
     if args.output:
         output_path = args.output
@@ -426,7 +559,8 @@ def main():
             rotation_suffix = ""
             if args.cam0_rotation > 0 or args.cam1_rotation > 0:
                 rotation_suffix = f"_r{args.cam0_rotation}_{args.cam1_rotation}"
-            output_path = os.path.join(args.folder, f"{folder_name}_concatenated{speed_suffix}{rotation_suffix}_{args.layout}.mp4")
+            sync_suffix = "_synced" if args.force_sync else ""
+            output_path = os.path.join(args.folder, f"{folder_name}_concatenated{speed_suffix}{rotation_suffix}{sync_suffix}_{args.layout}.mp4")
     
     # Create preview or full video
     if args.preview:
@@ -436,8 +570,9 @@ def main():
         success = create_super_fast_version(cam0_path, cam1_path, output_path, args.layout,
                                           args.cam0_rotation, args.cam1_rotation)
     else:
-        success = create_fast_concatenated_video(cam0_path, cam1_path, output_path, args.layout,
-                                               args.cam0_rotation, args.cam1_rotation)
+        success = create_synchronized_video(cam0_path, cam1_path, output_path, args.layout,
+                                          args.cam0_rotation, args.cam1_rotation, 
+                                          args.force_sync, args.target_frames)
     
     if success:
         if args.preview:

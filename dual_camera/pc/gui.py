@@ -831,6 +831,24 @@ class PiControllerGUI:
         ttk.Checkbutton(speed_frame, text="Super Fast (Hardware Acceleration)", 
                        variable=super_fast_var).grid(row=0, column=0, sticky='w', padx=10)
         
+        # Frame synchronization options
+        sync_frame = ttk.Frame(options_frame)
+        sync_frame.pack(fill='x', padx=5, pady=5)
+        
+        ttk.Label(sync_frame, text="Frame Synchronization:").grid(row=0, column=0, sticky='w', padx=10)
+        
+        force_sync_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(sync_frame, text="Force Sync (trim to shortest video)", 
+                       variable=force_sync_var).grid(row=1, column=0, sticky='w', padx=20)
+        
+        target_frames_frame = ttk.Frame(sync_frame)
+        target_frames_frame.grid(row=2, column=0, sticky='w', padx=20, pady=2)
+        ttk.Label(target_frames_frame, text="Target frames:").pack(side='left')
+        target_frames_var = tk.StringVar(value='')
+        target_frames_entry = ttk.Entry(target_frames_frame, textvariable=target_frames_var, width=10)
+        target_frames_entry.pack(side='left', padx=5)
+        ttk.Label(target_frames_frame, text="(leave empty for auto)").pack(side='left')
+        
         # Output path
         output_frame = ttk.Frame(options_frame)
         output_frame.pack(fill='x', padx=5, pady=5)
@@ -851,7 +869,8 @@ class PiControllerGUI:
                 rotation_suffix = ""
                 if cam0_rot != '0' or cam1_rot != '0':
                     rotation_suffix = f"_r{cam0_rot}_{cam1_rot}"
-                output_var.set(os.path.join(folder, f"{folder_name}_concatenated{speed_suffix}{rotation_suffix}_{layout}.mp4"))
+                sync_suffix = "_synced" if force_sync_var.get() else ""
+                output_var.set(os.path.join(folder, f"{folder_name}_concatenated{speed_suffix}{rotation_suffix}{sync_suffix}_{layout}.mp4"))
         
         # Update output path when any parameter changes
         folder_var.trace('w', lambda *args: update_output_path())
@@ -859,6 +878,7 @@ class PiControllerGUI:
         super_fast_var.trace('w', lambda *args: update_output_path())
         cam0_rotation_var.trace('w', lambda *args: update_output_path())
         cam1_rotation_var.trace('w', lambda *args: update_output_path())
+        force_sync_var.trace('w', lambda *args: update_output_path())
         
         # Progress and status
         status_frame = ttk.LabelFrame(dialog, text="Status")
@@ -871,6 +891,65 @@ class PiControllerGUI:
             status_text.insert('end', message + '\n')
             status_text.see('end')
             dialog.update()
+        
+        # Analyze sync function
+        def analyze_sync():
+            folder = folder_var.get()
+            if not folder:
+                messagebox.showerror("Error", "Please select a recording folder")
+                return
+            
+            if not os.path.exists(folder):
+                messagebox.showerror("Error", "Selected folder does not exist")
+                return
+            
+            # Check for video files
+            cam0_path = os.path.join(folder, "cam0.mp4")
+            cam1_path = os.path.join(folder, "cam1.mp4")
+            
+            if not os.path.exists(cam0_path) or not os.path.exists(cam1_path):
+                messagebox.showerror("Error", "cam0.mp4 and cam1.mp4 not found in selected folder")
+                return
+            
+            log_message("Analyzing frame synchronization...")
+            
+            # Run analysis in a separate thread
+            def analyze_thread():
+                try:
+                    import subprocess
+                    import sys
+                    
+                    # Build command for sync analysis
+                    cmd = [
+                        sys.executable, "post_process_videos.py",
+                        folder,
+                        "--analyze-sync"
+                    ]
+                    
+                    log_message("Running sync analysis...")
+                    log_message(f"Command: {' '.join(cmd)}")
+                    
+                    # Run with real-time output
+                    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, 
+                                             universal_newlines=True, bufsize=1)
+                    
+                    # Show progress in real-time
+                    for line in process.stdout:
+                        log_message(line.strip())
+                    
+                    process.wait()
+                    
+                    if process.returncode == 0:
+                        log_message("Sync analysis completed!")
+                    else:
+                        log_message(f"Error: Analysis returned code {process.returncode}")
+                        
+                except Exception as e:
+                    log_message(f"Error during analysis: {e}")
+            
+            thread = threading.Thread(target=analyze_thread)
+            thread.daemon = True
+            thread.start()
         
         # Preview function
         def create_preview():
@@ -989,12 +1068,17 @@ class PiControllerGUI:
             super_fast = super_fast_var.get()
             cam0_rot = int(cam0_rotation_var.get())
             cam1_rot = int(cam1_rotation_var.get())
+            force_sync = force_sync_var.get()
+            target_frames = target_frames_var.get().strip()
             
             log_message(f"Starting fast post-processing...")
             log_message(f"Folder: {folder}")
             log_message(f"Layout: {layout}")
             log_message(f"Cam0 rotation: {cam0_rot}°")
             log_message(f"Cam1 rotation: {cam1_rot}°")
+            log_message(f"Force sync: {force_sync}")
+            if target_frames:
+                log_message(f"Target frames: {target_frames}")
             log_message(f"Super Fast: {super_fast}")
             log_message(f"Output: {output_path}")
             
@@ -1013,6 +1097,18 @@ class PiControllerGUI:
                         "--cam0-rotation", str(cam0_rot),
                         "--cam1-rotation", str(cam1_rot)
                     ]
+                    
+                    # Add force sync if enabled
+                    if force_sync:
+                        cmd.append("--force-sync")
+                    
+                    # Add target frames if specified
+                    if target_frames:
+                        try:
+                            target_frames_int = int(target_frames)
+                            cmd.extend(["--target-frames", str(target_frames_int)])
+                        except ValueError:
+                            log_message("Warning: Invalid target frames value, ignoring")
                     
                     # Add super-fast flag if selected
                     if super_fast:
@@ -1050,6 +1146,7 @@ class PiControllerGUI:
         button_frame = ttk.Frame(dialog)
         button_frame.pack(fill='x', padx=10, pady=10)
         
+        ttk.Button(button_frame, text="Analyze Sync", command=analyze_sync).pack(side='left', padx=5)
         ttk.Button(button_frame, text="Create Preview", command=create_preview).pack(side='left', padx=5)
         ttk.Button(button_frame, text="Process Videos", command=process_videos).pack(side='left', padx=5)
         ttk.Button(button_frame, text="Close", command=dialog.destroy).pack(side='right', padx=5)
