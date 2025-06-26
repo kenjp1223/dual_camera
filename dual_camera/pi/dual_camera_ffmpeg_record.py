@@ -116,12 +116,12 @@ def synchronized_recording(cmd0, cmd1, frame_count, fps, duration):
     def led_buffer_thread(duration):
         led_start_event.wait()  # Wait until both cameras have started
         print("[DEBUG] LED buffer thread started after camera trigger.")
-        time.sleep(1)
+        time.sleep(2.5)
         set_led(True)
-        print("[DEBUG] LED ON (after 1s buffer)")
-        time.sleep(max(0, duration - 2))
+        print("[DEBUG] LED ON (after 2.5s buffer)")
+        time.sleep(max(0, duration - 5))
         set_led(False)
-        print("[DEBUG] LED OFF (1s before end)")
+        print("[DEBUG] LED OFF (2.5s before end)")
 
     # GPIO setup
     if HAS_GPIO:
