@@ -12,5 +12,19 @@
     "subject": "test",
     "width": "800",
     "height": "600"
+  },
+  {
+    "name": "Pi-stuberlab2",
+    "host": "http://192.168.2.12:5000",
+    "username": "stuberlab2",
+    "discovered": true,
+    "output_dir": "/home/stuberlab2/captures",
+    "duration": "10",
+    "fps": "30",
+    "subject": "default",
+    "width": "640",
+    "height": "480",
+    "cam0": "/dev/video0",
+    "cam1": "/dev/video4"
   }
 ]

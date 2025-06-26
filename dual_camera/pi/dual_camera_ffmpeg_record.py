@@ -6,6 +6,23 @@ import threading
 import signal
 import sys
 from datetime import datetime
+import cv2
+
+# GPIO setup for LED trigger
+try:
+    import RPi.GPIO as GPIO
+    HAS_GPIO = True
+except ImportError:
+    HAS_GPIO = False
+
+LED_PIN = 17
+
+def set_led(state):
+    if HAS_GPIO:
+        print(f"[DEBUG] Setting LED {'ON' if state else 'OFF'} on GPIO{LED_PIN}")
+        GPIO.output(LED_PIN, GPIO.HIGH if state else GPIO.LOW)
+    else:
+        print(f"[DEBUG] GPIO not available, LED {'ON' if state else 'OFF'} requested")
 
 def pre_warm_camera(device, duration=2):
     """Pre-warm camera to ensure it's ready for recording"""
@@ -31,11 +48,25 @@ def pre_warm_camera(device, duration=2):
         print(f"Warning: Failed to pre-warm camera {device}: {e}")
         return False
 
-def build_ffmpeg_command(device, output_path, width, height, fps, frames, sync_mode=True):
-    """Build ffmpeg command with synchronization options"""
+def flush_camera(device, num_frames=10):
+    """Flush camera buffer by grabbing and discarding a few frames."""
+    try:
+        print(f"Flushing camera buffer for {device}...")
+        cap = cv2.VideoCapture(device)
+        for _ in range(num_frames):
+            cap.read()
+        cap.release()
+        print(f"Camera {device} buffer flushed.")
+    except Exception as e:
+        print(f"Warning: Failed to flush buffer for {device}: {e}")
+
+def build_ffmpeg_command(device, output_path, width, height, fps, frames, sync_mode=True, add_timestamp=False):
+    """Build ffmpeg command with synchronization options and minimal buffering."""
     cmd = [
         "ffmpeg",
         "-f", "v4l2",
+        "-thread_queue_size", "512",
+        "-fflags", "nobuffer",
         "-input_format", "mjpeg",
         "-video_size", f"{width}x{height}",
         "-framerate", str(fps),
@@ -46,7 +77,12 @@ def build_ffmpeg_command(device, output_path, width, height, fps, frames, sync_m
         "-crf", "23",                            # Constant Rate Factor: 0–51 (lower is better)
         "-frames:v", str(frames),
     ]
-    
+    if add_timestamp:
+        # Overlay timestamp for debugging sync (optional)
+        cmd.extend([
+            "-vf",
+            "drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:text='%{pts\\:localtime\\:%T.%3f}':x=10:y=10:fontsize=24:fontcolor=white:box=1:boxcolor=0x00000099"
+        ])
     if sync_mode:
         # Add synchronization options
         cmd.extend([
@@ -54,48 +90,87 @@ def build_ffmpeg_command(device, output_path, width, height, fps, frames, sync_m
             "-fflags", "+genpts",                # Generate presentation timestamps
             "-max_interleave_delta", "0",        # Minimize interleaving delays
         ])
-    
     cmd.append(output_path)
     return cmd
 
 def synchronized_recording(cmd0, cmd1, frame_count, fps, duration):
-    """Start both cameras with precise synchronization"""
-    
+    """Start both cameras with precise synchronization and trigger LED indicator."""
     # Create a barrier for synchronization
     start_barrier = threading.Barrier(2)
     processes = []
-    
+    led_on = threading.Event()
+
     def run_camera(cmd, camera_name):
-        """Run a single camera with synchronization"""
         try:
-            # Wait for both cameras to be ready
             start_barrier.wait()
-            
-            print(f"Starting {camera_name} at {time.time():.6f}")
-            
-            # Start the ffmpeg process
+            # Turn on LED after both cameras are triggered
+            if HAS_GPIO and not led_on.is_set():
+                print("[DEBUG] Turning LED ON after camera trigger.")
+                set_led(True)
+                led_on.set()
+            print(f"Starting {camera_name} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')}")
             process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             processes.append((process, camera_name))
-            
-            # Wait for process to complete
             process.wait()
-            print(f"{camera_name} finished at {time.time():.6f}")
-            
+            print(f"{camera_name} finished at {datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')}")
         except Exception as e:
             print(f"Error in {camera_name}: {e}")
-    
+
+    # GPIO setup
+    if HAS_GPIO:
+        print(f"[DEBUG] Setting up GPIO{LED_PIN} for LED output.")
+        GPIO.setmode(GPIO.BCM)
+        GPIO.setup(LED_PIN, GPIO.OUT)
+        set_led(False)
+    else:
+        print("[DEBUG] GPIO not available, skipping LED setup.")
+
     # Start both cameras in separate threads
     thread0 = threading.Thread(target=run_camera, args=(cmd0, "cam0"))
     thread1 = threading.Thread(target=run_camera, args=(cmd1, "cam1"))
-    
     thread0.start()
     thread1.start()
-    
-    # Wait for both threads to complete
     thread0.join()
     thread1.join()
-    
+
+    # Turn off LED after both cameras finish
+    if HAS_GPIO:
+        print("[DEBUG] Turning LED OFF after recording finished.")
+        set_led(False)
+        GPIO.cleanup()
+    else:
+        print("[DEBUG] GPIO not available, skipping LED cleanup.")
+
     return processes
+
+def get_first_last_frame_timestamps(video_path):
+    """Return (first_pts, last_pts) in seconds for a video using ffprobe."""
+    try:
+        # Get all frame PTS times
+        cmd = [
+            'ffprobe',
+            '-v', 'error',
+            '-select_streams', 'v:0',
+            '-show_entries', 'frame=pts_time',
+            '-of', 'csv=p=0',
+            video_path
+        ]
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        pts_times = []
+        for line in result.stdout.strip().split('\n'):
+            if line.strip():
+                val = line.strip().split(',')[0]
+                try:
+                    pts_times.append(float(val))
+                except Exception:
+                    pass
+        if pts_times:
+            return pts_times[0], pts_times[-1]
+        else:
+            return None, None
+    except Exception as e:
+        print(f"Error extracting frame timestamps from {video_path}: {e}")
+        return None, None
 
 def main():
     parser = argparse.ArgumentParser(description="Dual USB camera capture with ffmpeg (synchronized)")
@@ -109,9 +184,11 @@ def main():
     parser.add_argument('--subject', type=str, default='default', help='Subject name for folder naming')
     parser.add_argument('--pre-warm', action='store_true', default=True, help='Pre-warm cameras before recording')
     parser.add_argument('--sync-mode', action='store_true', default=True, help='Use synchronization mode')
+    parser.add_argument('--add-timestamp', action='store_true', default=False, help='Overlay timestamp on video for debugging sync')
     args = parser.parse_args()
 
-    frame_count = args.duration * args.fps
+    # Add 5 seconds to the requested duration
+    record_duration = args.duration + 5
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     save_dir = os.path.join(args.output_dir, f'record_{args.subject}_{timestamp}')
     os.makedirs(save_dir, exist_ok=True)
@@ -119,7 +196,7 @@ def main():
     cam0_out = os.path.join(save_dir, "cam0.mp4")
     cam1_out = os.path.join(save_dir, "cam1.mp4")
 
-    print(f"Recording {frame_count} frames at {args.fps} FPS for {args.duration} seconds")
+    print(f"Recording for {record_duration} seconds at {args.fps} FPS")
     print(f"Subject: {args.subject}")
     print(f"Output directory: {save_dir}")
     print(f"Cam0: {args.cam0} -> {cam0_out}")
@@ -132,19 +209,53 @@ def main():
         pre_warm_camera(args.cam1)
         print("Pre-warming complete")
 
-    # Build ffmpeg commands
-    cmd0 = build_ffmpeg_command(args.cam0, cam0_out, args.width, args.height, args.fps, frame_count, args.sync_mode)
-    cmd1 = build_ffmpeg_command(args.cam1, cam1_out, args.width, args.height, args.fps, frame_count, args.sync_mode)
+    # Flush camera buffers before recording
+    flush_camera(args.cam0)
+    flush_camera(args.cam1)
+
+    # Build ffmpeg commands (remove frame count restriction, record for time only)
+    def build_ffmpeg_command_time(device, output_path, width, height, fps, duration, sync_mode=True, add_timestamp=False):
+        cmd = [
+            "ffmpeg",
+            "-f", "v4l2",
+            "-thread_queue_size", "512",
+            "-fflags", "nobuffer",
+            "-input_format", "mjpeg",
+            "-video_size", f"{width}x{height}",
+            "-framerate", str(fps),
+            "-i", device,
+            "-filter:v", f"fps={fps}",
+            "-vcodec", "libx264",
+            "-preset", "ultrafast",
+            "-crf", "23",
+            "-t", str(duration),  # Record for time only
+        ]
+        if add_timestamp:
+            cmd.extend([
+                "-vf",
+                "drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:text='%{pts\\:localtime\\:%T.%3f}':x=10:y=10:fontsize=24:fontcolor=white:box=1:boxcolor=0x00000099"
+            ])
+        if sync_mode:
+            cmd.extend([
+                "-avoid_negative_ts", "make_zero",
+                "-fflags", "+genpts",
+                "-max_interleave_delta", "0",
+            ])
+        cmd.append(output_path)
+        return cmd
+
+    cmd0 = build_ffmpeg_command_time(args.cam0, cam0_out, args.width, args.height, args.fps, record_duration, args.sync_mode, args.add_timestamp)
+    cmd1 = build_ffmpeg_command_time(args.cam1, cam1_out, args.width, args.height, args.fps, record_duration, args.sync_mode, args.add_timestamp)
 
     print("Starting synchronized recording...")
     start_time = time.time()
 
     # Start synchronized recording
-    processes = synchronized_recording(cmd0, cmd1, frame_count, args.fps, args.duration)
+    processes = synchronized_recording(cmd0, cmd1, None, args.fps, record_duration)
 
     elapsed = time.time() - start_time
     print(f"Recording completed. Elapsed time: {elapsed:.2f} seconds")
-    print(f"Expected duration: {args.duration} s, Expected frames: {frame_count}")
+    print(f"Expected duration: {record_duration} s")
 
     # Check if both processes completed successfully
     for process, camera_name in processes:
@@ -156,18 +267,6 @@ def main():
     # Verify output files
     if os.path.exists(cam0_out) and os.path.exists(cam1_out):
         print("Both output files created successfully")
-        
-        # Get file sizes for verification
-        size0 = os.path.getsize(cam0_out)
-        size1 = os.path.getsize(cam1_out)
-        print(f"File sizes - cam0: {size0:,} bytes, cam1: {size1:,} bytes")
-        
-        # Check for significant size differences (potential sync issues)
-        size_diff = abs(size0 - size1)
-        size_ratio = size_diff / max(size0, size1)
-        if size_ratio > 0.1:  # More than 10% difference
-            print(f"Warning: Large file size difference detected ({size_ratio:.1%})")
-            print("This may indicate synchronization issues")
     else:
         print("Error: One or both output files missing")
 

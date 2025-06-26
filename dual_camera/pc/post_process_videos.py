@@ -10,6 +10,10 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+import tkinter as tk
+from tkinter import filedialog, messagebox
+from PIL import Image, ImageTk
+import cv2
 
 def check_video_files(folder_path):
     """Check if both cam0.mp4 and cam1.mp4 exist in the folder"""
@@ -491,6 +495,276 @@ def create_super_fast_version(cam0_path, cam1_path, output_path, layout='vertica
         print(f"Error during video processing: {e}")
         return False
 
+def launch_manual_sync_gui():
+    class VideoSyncGUI:
+        def __init__(self, master):
+            self.master = master
+            self.master.title("Dual Camera Manual Sync & Trimming")
+            self.folder = None
+            self.cam0_path = None
+            self.cam1_path = None
+            self.cap0 = None
+            self.cap1 = None
+            self.frame0 = 0
+            self.frame1 = 0
+            self.total_frames0 = 0
+            self.total_frames1 = 0
+            self.frame0_zero = 0
+            self.frame0_last = 0
+            self.frame1_zero = 0
+            self.frame1_last = 0
+            self.duration = 0
+            self.fps0 = 30
+            self.fps1 = 30
+            self.layout = tk.StringVar(value='vertical')
+            self.init_gui()
+
+        def init_gui(self):
+            # Folder selection
+            folder_btn = tk.Button(self.master, text="Select Folder", command=self.select_folder)
+            folder_btn.grid(row=0, column=0, columnspan=2, sticky="ew")
+            self.folder_label = tk.Label(self.master, text="No folder selected")
+            self.folder_label.grid(row=1, column=0, columnspan=2, sticky="ew")
+
+            # Video canvases
+            self.canvas0 = tk.Label(self.master)
+            self.canvas0.grid(row=2, column=0)
+            self.canvas1 = tk.Label(self.master)
+            self.canvas1.grid(row=2, column=1)
+
+            # Frame navigation and direct entry
+            nav_frame = tk.Frame(self.master)
+            nav_frame.grid(row=3, column=0, columnspan=2)
+            # cam0 controls
+            tk.Button(nav_frame, text="<< Prev0", command=lambda: self.change_frame(0, -1)).pack(side=tk.LEFT)
+            tk.Button(nav_frame, text="Next0 >>", command=lambda: self.change_frame(0, 1)).pack(side=tk.LEFT)
+            tk.Button(nav_frame, text="Set Frame Zero 0", command=lambda: self.set_frame_zero(0)).pack(side=tk.LEFT)
+            tk.Button(nav_frame, text="Set Frame Last 0", command=lambda: self.set_frame_last(0)).pack(side=tk.LEFT)
+            # cam0 direct entry
+            tk.Label(nav_frame, text="  Go to frame 0:").pack(side=tk.LEFT)
+            self.frame0_entry = tk.Entry(nav_frame, width=6)
+            self.frame0_entry.pack(side=tk.LEFT)
+            tk.Button(nav_frame, text="Go", command=lambda: self.goto_frame(0)).pack(side=tk.LEFT)
+            self.frame0_entry.bind('<Return>', lambda event: self.goto_frame(0))
+            tk.Label(nav_frame, text="   ").pack(side=tk.LEFT)
+            # cam1 controls
+            tk.Button(nav_frame, text="<< Prev1", command=lambda: self.change_frame(1, -1)).pack(side=tk.LEFT)
+            tk.Button(nav_frame, text="Next1 >>", command=lambda: self.change_frame(1, 1)).pack(side=tk.LEFT)
+            tk.Button(nav_frame, text="Set Frame Zero 1", command=lambda: self.set_frame_zero(1)).pack(side=tk.LEFT)
+            tk.Button(nav_frame, text="Set Frame Last 1", command=lambda: self.set_frame_last(1)).pack(side=tk.LEFT)
+            # cam1 direct entry
+            tk.Label(nav_frame, text="  Go to frame 1:").pack(side=tk.LEFT)
+            self.frame1_entry = tk.Entry(nav_frame, width=6)
+            self.frame1_entry.pack(side=tk.LEFT)
+            tk.Button(nav_frame, text="Go", command=lambda: self.goto_frame(1)).pack(side=tk.LEFT)
+            self.frame1_entry.bind('<Return>', lambda event: self.goto_frame(1))
+
+            # Info labels
+            self.info0 = tk.Label(self.master, text="cam0: Frame 0/0")
+            self.info0.grid(row=4, column=0)
+            self.info1 = tk.Label(self.master, text="cam1: Frame 0/0")
+            self.info1.grid(row=4, column=1)
+
+            # Layout selector
+            options_frame = tk.Frame(self.master)
+            options_frame.grid(row=5, column=0, columnspan=2)
+            tk.Label(options_frame, text="Layout:").pack(side=tk.LEFT)
+            tk.OptionMenu(options_frame, self.layout, 'vertical', 'horizontal').pack(side=tk.LEFT)
+            # Duration on its own row
+            duration_frame = tk.Frame(self.master)
+            duration_frame.grid(row=6, column=0, columnspan=2, sticky="ew")
+            tk.Label(duration_frame, text="Duration (s):").pack(side=tk.LEFT)
+            self.duration_entry = tk.Entry(duration_frame, width=8)
+            self.duration_entry.pack(side=tk.LEFT)
+            self.duration_entry.insert(0, "0")
+
+            # Rotation controls for preview
+            rot_frame = tk.Frame(self.master)
+            rot_frame.grid(row=7, column=0, columnspan=2)
+            tk.Label(rot_frame, text="Cam0 Rotation:").pack(side=tk.LEFT)
+            self.cam0_rot_var = tk.IntVar(value=0)
+            tk.OptionMenu(rot_frame, self.cam0_rot_var, 0, 90, 180, 270, command=lambda _: self.update_preview(0)).pack(side=tk.LEFT)
+            tk.Label(rot_frame, text="   Cam1 Rotation:").pack(side=tk.LEFT)
+            self.cam1_rot_var = tk.IntVar(value=0)
+            tk.OptionMenu(rot_frame, self.cam1_rot_var, 0, 90, 180, 270, command=lambda _: self.update_preview(1)).pack(side=tk.LEFT)
+            tk.Button(rot_frame, text="Preview Rotated Frames", command=self.preview_both).pack(side=tk.LEFT, padx=10)
+
+            # Process button
+            process_btn = tk.Button(self.master, text="Trim && Concatenate", command=self.process_videos)
+            process_btn.grid(row=8, column=0, columnspan=2, sticky="ew")
+
+        def select_folder(self):
+            folder = filedialog.askdirectory()
+            if not folder:
+                return
+            self.folder = folder
+            self.folder_label.config(text=folder)
+            self.cam0_path = os.path.join(folder, "cam0.mp4")
+            self.cam1_path = os.path.join(folder, "cam1.mp4")
+            if not (os.path.exists(self.cam0_path) and os.path.exists(self.cam1_path)):
+                messagebox.showerror("Error", "cam0.mp4 or cam1.mp4 not found in selected folder")
+                return
+            self.cap0 = cv2.VideoCapture(self.cam0_path)
+            self.cap1 = cv2.VideoCapture(self.cam1_path)
+            self.total_frames0 = int(self.cap0.get(cv2.CAP_PROP_FRAME_COUNT))
+            self.total_frames1 = int(self.cap1.get(cv2.CAP_PROP_FRAME_COUNT))
+            self.fps0 = self.cap0.get(cv2.CAP_PROP_FPS) or 30
+            self.fps1 = self.cap1.get(cv2.CAP_PROP_FPS) or 30
+            self.frame0 = 0
+            self.frame1 = 0
+            self.frame0_zero = 0
+            self.frame1_zero = 0
+            self.frame0_last = self.total_frames0 - 1
+            self.frame1_last = self.total_frames1 - 1
+            self.duration_entry.delete(0, tk.END)
+            self.duration_entry.insert(0, str(int(min(self.total_frames0/self.fps0, self.total_frames1/self.fps1))))
+            self.show_frame(0)
+            self.show_frame(1)
+            self.update_info()
+
+        def rotate_frame(self, frame, angle):
+            if angle == 90:
+                return cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+            elif angle == 180:
+                return cv2.rotate(frame, cv2.ROTATE_180)
+            elif angle == 270:
+                return cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+            return frame
+
+        def update_preview(self, cam):
+            if cam == 0:
+                self.show_frame(0, apply_rotation=True)
+            else:
+                self.show_frame(1, apply_rotation=True)
+
+        def preview_both(self):
+            self.show_frame(0, apply_rotation=True)
+            self.show_frame(1, apply_rotation=True)
+
+        def show_frame(self, cam, apply_rotation=False):
+            if cam == 0 and self.cap0:
+                self.cap0.set(cv2.CAP_PROP_POS_FRAMES, self.frame0)
+                ret, frame = self.cap0.read()
+                if ret:
+                    angle = self.cam0_rot_var.get() if apply_rotation else 0
+                    frame = self.rotate_frame(frame, angle)
+                    img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    img = Image.fromarray(img)
+                    img = img.resize((320, 240))
+                    imgtk = ImageTk.PhotoImage(img)
+                    self.canvas0.imgtk = imgtk
+                    self.canvas0.config(image=imgtk)
+            elif cam == 1 and self.cap1:
+                self.cap1.set(cv2.CAP_PROP_POS_FRAMES, self.frame1)
+                ret, frame = self.cap1.read()
+                if ret:
+                    angle = self.cam1_rot_var.get() if apply_rotation else 0
+                    frame = self.rotate_frame(frame, angle)
+                    img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    img = Image.fromarray(img)
+                    img = img.resize((320, 240))
+                    imgtk = ImageTk.PhotoImage(img)
+                    self.canvas1.imgtk = imgtk
+                    self.canvas1.config(image=imgtk)
+
+        def change_frame(self, cam, delta):
+            if cam == 0:
+                self.frame0 = max(0, min(self.total_frames0-1, self.frame0+delta))
+                self.show_frame(0)
+            else:
+                self.frame1 = max(0, min(self.total_frames1-1, self.frame1+delta))
+                self.show_frame(1)
+            self.update_info()
+
+        def set_frame_zero(self, cam):
+            if cam == 0:
+                self.frame0_zero = self.frame0
+            else:
+                self.frame1_zero = self.frame1
+            self.update_info()
+
+        def set_frame_last(self, cam):
+            if cam == 0:
+                self.frame0_last = self.frame0
+            else:
+                self.frame1_last = self.frame1
+            self.update_info()
+
+        def goto_frame(self, cam):
+            try:
+                if cam == 0:
+                    val = int(self.frame0_entry.get()) - 1
+                    if 0 <= val < self.total_frames0:
+                        self.frame0 = val
+                        self.show_frame(0)
+                else:
+                    val = int(self.frame1_entry.get()) - 1
+                    if 0 <= val < self.total_frames1:
+                        self.frame1 = val
+                        self.show_frame(1)
+                self.update_info()
+            except Exception:
+                pass
+
+        def update_info(self):
+            self.info0.config(text=f"cam0: Frame {self.frame0+1}/{self.total_frames0} | Zero: {self.frame0_zero+1} | Last: {self.frame0_last+1}")
+            self.info1.config(text=f"cam1: Frame {self.frame1+1}/{self.total_frames1} | Zero: {self.frame1_zero+1} | Last: {self.frame1_last+1}")
+
+        def process_videos(self):
+            try:
+                duration = float(self.duration_entry.get())
+                # Calculate start and end times in seconds for each video
+                start0 = self.frame0_zero / self.fps0
+                end0 = (self.frame0_last + 1) / self.fps0
+                trim_duration0 = end0 - start0
+                start1 = self.frame1_zero / self.fps1
+                end1 = (self.frame1_last + 1) / self.fps1
+                trim_duration1 = end1 - start1
+                # Output paths
+                out0 = os.path.normpath(os.path.join(self.folder, "cam0_trimmed.mp4"))
+                out1 = os.path.normpath(os.path.join(self.folder, "cam1_trimmed.mp4"))
+                # Trim videos using ffmpeg (frame-accurate, re-encode)
+                cmd0 = [
+                    'ffmpeg', '-y', '-i', self.cam0_path,
+                    '-ss', str(start0), '-t', str(trim_duration0),
+                    '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23', out0
+                ]
+                cmd1 = [
+                    'ffmpeg', '-y', '-i', self.cam1_path,
+                    '-ss', str(start1), '-t', str(trim_duration1),
+                    '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23', out1
+                ]
+                subprocess.run(cmd0, check=True)
+                subprocess.run(cmd1, check=True)
+                # Check if trimmed videos exist
+                if not (os.path.exists(out0) and os.path.exists(out1)):
+                    messagebox.showerror("Error", "Failed to create trimmed videos.")
+                    return
+                # Concatenate as before
+                layout = self.layout.get()
+                concat_output = os.path.normpath(os.path.join(self.folder, f"manualsync_concatenated_{layout}_raw.mp4"))
+                success = create_synchronized_video(out0, out1, concat_output, layout=layout,
+                                                   cam0_rotation=self.cam0_rot_var.get(),
+                                                   cam1_rotation=self.cam1_rot_var.get())
+                if not success or not os.path.exists(concat_output):
+                    messagebox.showerror("Error", f"Failed to create concatenated video: {concat_output}")
+                    return
+                # Final trim to user-specified duration
+                trimmed_output = os.path.normpath(os.path.join(self.folder, f"manualsync_concatenated_{layout}_trimmed.mp4"))
+                trim_cmd = [
+                    'ffmpeg', '-y', '-i', concat_output,
+                    '-ss', '0', '-t', str(duration),
+                    '-c:v', 'copy', trimmed_output
+                ]
+                subprocess.run(trim_cmd, check=True)
+                messagebox.showinfo("Done", f"Trimmed and concatenated video saved as {trimmed_output}")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to process videos: {e}")
+
+    root = tk.Tk()
+    app = VideoSyncGUI(root)
+    root.mainloop()
+
 def main():
     parser = argparse.ArgumentParser(description="Fast concatenation of dual camera videos with frame synchronization")
     parser.add_argument('folder', help='Folder containing cam0.mp4 and cam1.mp4')
@@ -584,4 +858,7 @@ def main():
         sys.exit(1)
 
 if __name__ == '__main__':
-    main() 
+    if '--gui' in sys.argv:
+        launch_manual_sync_gui()
+    else:
+        main() 

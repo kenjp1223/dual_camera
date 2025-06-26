@@ -18,6 +18,18 @@ This guide describes how to set up and control multiple Raspberry Pi devices (e.
 
 ### ✅ Assign Static IP Over Ethernet
 
+SSH login if going headless
+```bash
+ssh <username>@<hostname>
+```
+
+
+
+Install dhcpcd
+
+```bash
+sudo apt update && sudo apt install dhcpcd5 -y
+```
 Edit the file:
 
 ```bash
@@ -28,7 +40,7 @@ Append (change IP for each Pi):
 
 ```ini
 interface eth0
-static ip_address=192.168.2.11/24  # Use 192.168.2.12, .13, etc. for other Pis
+static ip_address=192.168.2.XX/24  # Use 192.168.2.12, .13, etc. for other Pis
 static domain_name_servers=8.8.8.8 1.1.1.1
 ```
 
@@ -47,7 +59,7 @@ sudo reboot
 ### ✅ Install Dependencies
 
 ```bash
-sudo apt update && sudo apt install git python3-venv ffmpeg -y
+sudo apt update && sudo apt install git python3-venv ffmpeg python3-dev -y
 ```
 
 ### ✅ Clone Your Repository
@@ -67,7 +79,7 @@ source dualcam-venv/bin/activate
 ### ✅ Install Python Dependencies
 
 ```bash
-pip install flask
+pip install flask RPi.GPIO
 ```
 
 Or export and use:
@@ -85,13 +97,13 @@ pip install -r requirements.txt
 
 ```bash
 source dualcam-venv/bin/activate
-cd /home/stuberlab1/dual_camera/dual_camera/pi
+cd /home/<username>/dual_camera/dual_camera/pi
 python3 dual_camera_ffmpeg_record.py \
   --duration 10 \
   --fps 100 \
   --width 640 \
   --height 480 \
-  --output_dir /home/stuberlab1/captures
+  --output_dir /home/<username>/captures
 ```
 
 Check that `cam0.mp4` and `cam1.mp4` exist and are similar in frame count and duration.
@@ -110,14 +122,14 @@ v4l2-ctl --list-devices
 
 ```bash
 source dualcam-venv/bin/activate
-cd /home/stuberlab1/dual_camera/dual_camera/pi
+cd /home/<username>/dual_camera/dual_camera/pi
 python3 camera_server.py
 ```
 
 Look for:
 
 ```
-Running on http://192.168.2.11:5000
+Running on http://192.168.2.XX:5000
 ```
 
 ### ✅ Trigger Recording from PC
@@ -125,7 +137,7 @@ Running on http://192.168.2.11:5000
 #### PowerShell (Windows):
 
 ```powershell
-curl -X POST http://192.168.2.11:5000/start_recording ^
+curl -X POST http://192.168.2.XX:5000/start_recording ^
   -H "Content-Type: application/json" ^
   -d "{\"duration\": 10, \"fps\": 100, \"width\": 640, \"height\": 480}"
 ```
@@ -133,7 +145,7 @@ curl -X POST http://192.168.2.11:5000/start_recording ^
 #### Linux/macOS/WSL:
 
 ```bash
-curl -X POST http://192.168.2.11:5000/start_recording \
+curl -X POST http://192.168.2.XX:5000/start_recording \
   -H "Content-Type: application/json" \
   -d '{"duration": 10, "fps": 100, "width": 640, "height": 480}'
 ```
