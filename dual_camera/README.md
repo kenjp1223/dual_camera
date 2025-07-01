@@ -91,9 +91,58 @@ pip install -r requirements.txt
 
 ---
 
+## 2a. High-Speed Recording with RAM Disk (tmpfs) [Recommended]
+
+To prevent dropped frames and maximize write speed, the recording script writes video files to a RAM disk (tmpfs) during capture, then moves them to permanent storage after recording.
+
+**If the RAM disk is not set up, the script will exit with an error and instruct you to read this section.**
+
+### How to Set Up a RAM Disk on Raspberry Pi
+
+1. **Edit `/etc/fstab` to add a RAM disk:**
+   ```bash
+   sudo nano /etc/fstab
+   ```
+   Add this line at the end (for a 2GB RAM disk):
+   ```
+   tmpfs   /mnt/ramdisk   tmpfs   defaults,size=2G   0   0
+   ```
+   Adjust `size=2G` as needed (e.g., 1G, 3G).
+
+2. **Create the mount point and mount the RAM disk:**
+   ```bash
+   sudo mkdir -p /mnt/ramdisk
+   sudo mount /mnt/ramdisk
+   ```
+
+3. **Verify:**
+   ```bash
+   df -h /mnt/ramdisk
+   ```
+   You should see the correct size and available space.
+
+4. **The RAM disk will now be available at `/mnt/ramdisk` on every boot.**
+
+### How Recording Works with RAM Disk
+
+- During recording, video files are written to `/mnt/ramdisk/record_<subject>_<timestamp>/`.
+- After recording, files are automatically moved to your specified output directory (e.g., `/home/pi/captures`).
+- If the RAM disk is missing or not mounted, the script will print an error and exit.  
+  **Check this section if you see an error about the RAM disk.**
+
+### Why Use a RAM Disk?
+
+- **Much faster write speeds** (prevents dropped frames at high FPS/resolution).
+- **Reduces SD card wear** (important for Pi longevity).
+- **Files are only moved to permanent storage after recording is complete.**
+
+---
+
 ## 3. Running the Recording Script Manually
 
 ### ✅ Test Recording
+
+The script will write to the RAM disk first, then move files to your output directory after recording. If the RAM disk is not available, you will see an error message with instructions.
 
 ```bash
 source dualcam-venv/bin/activate

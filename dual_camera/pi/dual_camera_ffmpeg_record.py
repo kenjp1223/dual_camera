@@ -7,6 +7,7 @@ import signal
 import sys
 from datetime import datetime
 import cv2
+import shutil
 
 # GPIO setup for LED trigger
 try:
@@ -197,15 +198,25 @@ def main():
     # Add 5 seconds to the requested duration
     record_duration = args.duration + 5
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    save_dir = os.path.join(args.output_dir, f'record_{args.subject}_{timestamp}')
-    os.makedirs(save_dir, exist_ok=True)
 
-    cam0_out = os.path.join(save_dir, "cam0.mp4")
-    cam1_out = os.path.join(save_dir, "cam1.mp4")
+    # --- RAMDISK LOGIC ---
+    RAMDISK_PATH = '/mnt/ramdisk'
+    ramdisk_save_dir = os.path.join(RAMDISK_PATH, f'record_{args.subject}_{timestamp}')
+    try:
+        os.makedirs(ramdisk_save_dir, exist_ok=True)
+    except Exception as e:
+        print(f"\nERROR: RAM disk not found or not mounted at {RAMDISK_PATH}.")
+        print("Please see the README.md for instructions on setting up the RAM disk (tmpfs).\n")
+        print(f"Details: {e}")
+        exit(1)
+
+    cam0_out = os.path.join(ramdisk_save_dir, "cam0.mp4")
+    cam1_out = os.path.join(ramdisk_save_dir, "cam1.mp4")
 
     print(f"Recording for {record_duration} seconds at {args.fps} FPS")
     print(f"Subject: {args.subject}")
-    print(f"Output directory: {save_dir}")
+    print(f"Temporary RAM disk directory: {ramdisk_save_dir}")
+    print(f"Final output directory: {args.output_dir}")
     print(f"Cam0: {args.cam0} -> {cam0_out}")
     print(f"Cam1: {args.cam1} -> {cam1_out}")
 
@@ -276,6 +287,21 @@ def main():
         print("Both output files created successfully")
     else:
         print("Error: One or both output files missing")
+
+    # After recording, move files from RAM disk to final output directory
+    final_save_dir = os.path.join(args.output_dir, f'record_{args.subject}_{timestamp}')
+    os.makedirs(final_save_dir, exist_ok=True)
+    try:
+        shutil.move(cam0_out, os.path.join(final_save_dir, "cam0.mp4"))
+        shutil.move(cam1_out, os.path.join(final_save_dir, "cam1.mp4"))
+        print(f"Files moved to {final_save_dir}")
+        # Optionally, remove the now-empty RAM disk directory
+        try:
+            os.rmdir(ramdisk_save_dir)
+        except Exception:
+            pass
+    except Exception as e:
+        print(f"Error moving files from RAM disk: {e}")
 
 if __name__ == '__main__':
     main()
