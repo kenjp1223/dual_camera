@@ -1,6 +1,6 @@
 # Dual Camera Raspberry Pi Setup (multi-device ready)
 
-This guide describes how to set up and control multiple Raspberry Pi devices (e.g., `xxlab1`, `xxlab2`, etc.) for synchronized dual USB camera recording using `ffmpeg`. Recording is triggered remotely from a host PC over Ethernet or Wi-Fi using a comprehensive GUI interface.
+This guide describes how to set up and control multiple Raspberry Pi devices (e.g., `xxlab1`, `xxlab2`, etc.) for synchronized dual USB camera recording using `ffmpeg`. Recording is triggered remotely from a host PC over Ethernet or Wi-Fi using a comprehensive GUI interface with advanced post-processing capabilities.
 
 ---
 
@@ -244,50 +244,81 @@ The PC GUI provides a comprehensive interface for managing multiple Raspberry Pi
 - **Config Persistence**: Load/save configurations to JSON files
 - **Dynamic Output Paths**: Automatically set output directory based on Pi username
 
+#### **Post-Processing Integration**
+- **Manual Sync GUI**: Launch advanced post-processing interface directly from Pi tabs
+- **One-Click Processing**: Streamlined workflow from recording to final output
+
 ---
 
-## 6. Post-Processing and Video Management
+## 6. Advanced Post-Processing and Video Management
 
-### ✅ Fast Video Concatenation
+### ✅ Manual Synchronization and Cropping GUI
 
-The system includes a high-performance post-processing script that can:
+The system includes a sophisticated post-processing interface with manual synchronization and advanced cropping capabilities:
 
-#### **Concatenation Options**
-- **Vertical Layout**: cam0 on top, cam1 on bottom
-- **Horizontal Layout**: cam0 on left, cam1 on right
-- **Camera Rotation**: Rotate individual cameras (0°, 90°, 180°, 270°)
-- **Preview Snapshots**: Quick JPG previews to check orientation before processing
+#### **Manual Sync Features**
+- **Frame-by-Frame Synchronization**: Manually align cam0 and cam1 videos frame by frame
+- **Direct Frame Entry**: Enter specific frame numbers for precise synchronization
+- **Real-time Preview**: See synchronized frames side-by-side with rotation support
+- **Duration Trimming**: Set final video duration after synchronization
 
-#### **Performance Optimizations**
-- **Copy Mode**: Fast concatenation when videos have same properties
-- **Hardware Acceleration**: Uses Raspberry Pi hardware encoder when available
-- **Ultrafast Encoding**: Optimized settings for maximum speed
-- **Progress Tracking**: Real-time progress updates during processing
+#### **Advanced Cropping Interface**
+- **2-Column Layout**: Side-by-side cam0 and cam1 cropping controls for easy comparison
+- **Rectangular Cropping**: Precise width, height, and offset controls for each camera
+- **Percentage-based Controls**: Width and height as percentages of original video
+- **Offset Positioning**: X and Y offsets to position the crop area
+- **Live Preview**: See cropping effects applied to preview snapshots
+- **Settings Persistence**: Save and load cropping configurations
+
+#### **Cropping Parameters**
+- **Width/Height**: Set as percentages (0.1 to 1.0) of original video dimensions
+- **X/Y Offsets**: Position the crop area (0.0 to 0.9 range)
+- **Independent Control**: Different cropping for cam0 and cam1
+- **Preview Integration**: Cropping applied to both preview and final processing
+
+### ✅ Post-Processing Workflow
+
+#### **Step 1: Manual Synchronization**
+1. Select recording folder containing cam0.mp4 and cam1.mp4
+2. Use frame controls to align videos frame by frame
+3. Set desired final duration
+4. Preview synchronized result
+
+#### **Step 2: Cropping Configuration**
+1. Adjust width, height, and offset for cam0 and cam1
+2. Use preview to see cropping effects
+3. Save cropping settings for reuse
+4. Load previous cropping configurations
+
+#### **Step 3: Video Processing**
+1. Apply synchronization and cropping to create trimmed videos
+2. Concatenate cam0 and cam1 into final merged video
+3. Output files: `cam0_trimmed.mp4`, `cam1_trimmed.mp4`, `merged_video.mp4`
+
+### ✅ Performance Optimizations
+- **RAM Disk Processing**: Temporary files written to RAM for maximum speed
+- **Frame-Accurate Trimming**: Precise video cuts using ffmpeg with re-encoding
+- **Efficient Concatenation**: Optimized merging without redundant processing
+- **Progress Tracking**: Real-time updates during processing
 
 ### ✅ Using Post-Processing
 
 #### **Via GUI**
-1. Click "Post Process" on any Pi tab
+1. Click "Post Process" on any Pi tab to launch manual sync GUI
 2. Select recording folder containing cam0.mp4 and cam1.mp4
-3. Choose layout (vertical/horizontal)
-4. Set camera rotations if needed
-5. Click "Create Preview" to check orientation
-6. Click "Process Videos" for final concatenation
+3. Synchronize videos frame by frame
+4. Configure cropping settings for both cameras
+5. Preview results before processing
+6. Click "Process Videos" for final output
 
 #### **Via Command Line**
 
 ```bash
-# Basic concatenation
+# Launch manual sync GUI
+python post_process_videos.py
+
+# Process with specific settings
 python post_process_videos.py /path/to/recording/folder
-
-# With rotation (cam0 rotated 180°, cam1 normal)
-python post_process_videos.py /path/to/folder --cam0-rotation 180
-
-# Create preview snapshot
-python post_process_videos.py /path/to/folder --preview
-
-# Horizontal layout with hardware acceleration
-python post_process_videos.py /path/to/folder --layout horizontal --super-fast
 
 # List available recording folders
 python post_process_videos.py /path/to/captures --list-folders
@@ -295,10 +326,10 @@ python post_process_videos.py /path/to/captures --list-folders
 
 ### ✅ Output Files
 
-- **Concatenated Videos**: `{folder_name}_concatenated_fast_{layout}.mp4`
-- **Rotated Videos**: `{folder_name}_concatenated_fast_r{rot0}_{rot1}_{layout}.mp4`
-- **Preview Snapshots**: `{folder_name}_preview_{layout}.jpg`
-- **Hardware Accelerated**: `{folder_name}_concatenated_superfast_{layout}.mp4`
+- **Synchronized Videos**: `cam0_trimmed.mp4`, `cam1_trimmed.mp4` (cropped and duration-trimmed)
+- **Final Merged Video**: `merged_video.mp4` (concatenated result)
+- **Cropping Settings**: Saved configurations for reuse
+- **Preview Snapshots**: JPG previews with cropping applied
 
 ---
 
@@ -334,15 +365,20 @@ chmod +x start_camera_server.sh
 3. **Configuration**: Set recording parameters and camera assignments per Pi
 4. **Recording**: Start synchronized recording across all Pis
 5. **Monitoring**: View live snapshots and recording status
-6. **Post-Processing**: Concatenate videos with rotation correction
-7. **Analysis**: Use the final concatenated videos for analysis
+6. **Post-Processing**: Use manual sync GUI for frame alignment and cropping
+7. **Analysis**: Use the final synchronized and cropped videos for analysis
 
 ### ✅ Troubleshooting
 
-#### **Camera Orientation Issues**
-- Use "Create Preview" to check camera orientation
-- Apply rotation (typically 180° for upside-down cameras)
-- Common: cam0 rotation 180° for flipped top camera
+#### **Synchronization Issues**
+- Use manual sync GUI for frame-by-frame alignment
+- Check frame counts between cam0 and cam1 videos
+- Ensure videos have similar durations before processing
+
+#### **Cropping Problems**
+- Use preview function to verify cropping settings
+- Adjust width/height percentages and offsets as needed
+- Save successful cropping configurations for reuse
 
 #### **Network Connectivity**
 - Ensure Pis are on 192.168.2.x network
@@ -350,7 +386,7 @@ chmod +x start_camera_server.sh
 - Verify Pi camera server is running on port 5000
 
 #### **Performance Issues**
-- Use "Super Fast" mode for hardware acceleration
+- Use RAM disk for temporary file processing
 - Ensure sufficient storage space on Pis
 - Check USB camera compatibility with v4l2
 
@@ -363,8 +399,9 @@ You now have a complete multi-device recording system where each Pi:
 * Has a unique name and static IP
 * Can be controlled remotely via PC GUI
 * Records synced dual-camera video to local storage
-* Supports real-time monitoring and post-processing
-* Includes camera rotation and preview capabilities
+* Supports real-time monitoring and advanced post-processing
+* Includes manual synchronization, cropping, and preview capabilities
+* Features a modern 2-column interface for easy cropping comparison
 
 The system scales from 1-2 Pis to 8+ devices with the tabbed interface, making it suitable for both small experiments and large-scale data collection.
 
