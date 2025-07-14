@@ -144,7 +144,7 @@ class CameraSettingsDialog:
     def __init__(self, parent, pi_host, device):
         self.dialog = tk.Toplevel(parent)
         self.dialog.title(f"Camera Settings - {device}")
-        self.dialog.geometry("600x700")
+        self.dialog.geometry("800x800")
         self.dialog.transient(parent)
         self.dialog.grab_set()
         
@@ -152,24 +152,35 @@ class CameraSettingsDialog:
         self.device = device
         self.settings_vars = {}
         self.properties = {}
+        self.preview_image = None
         
         self.setup_ui()
         self.load_properties()
         self.load_settings()
+        # Take initial snapshot
+        self.take_snapshot()
     
     def setup_ui(self):
-        # Main frame
+        # Main frame with two columns
         main_frame = ttk.Frame(self.dialog)
         main_frame.pack(fill='both', expand=True, padx=10, pady=10)
         
+        # Left column: Settings
+        left_frame = ttk.Frame(main_frame)
+        left_frame.pack(side='left', fill='both', expand=True, padx=(0, 5))
+        
+        # Right column: Preview
+        right_frame = ttk.Frame(main_frame)
+        right_frame.pack(side='right', fill='both', expand=True, padx=(5, 0))
+        
         # Device info
-        info_frame = ttk.LabelFrame(main_frame, text="Device Information")
+        info_frame = ttk.LabelFrame(left_frame, text="Device Information")
         info_frame.pack(fill='x', pady=(0, 10))
         ttk.Label(info_frame, text=f"Device: {self.device}").pack(anchor='w', padx=5, pady=2)
         ttk.Label(info_frame, text=f"Host: {self.pi_host}").pack(anchor='w', padx=5, pady=2)
         
         # Settings frame with scrollbar
-        settings_frame = ttk.LabelFrame(main_frame, text="Camera Settings")
+        settings_frame = ttk.LabelFrame(left_frame, text="Camera Settings")
         settings_frame.pack(fill='both', expand=True, pady=(0, 10))
         
         # Create canvas with scrollbar
@@ -191,11 +202,34 @@ class CameraSettingsDialog:
         # Settings will be added here dynamically
         self.settings_container = scrollable_frame
         
+        # Preview frame
+        preview_frame = ttk.LabelFrame(right_frame, text="Live Preview")
+        preview_frame.pack(fill='both', expand=True, pady=(0, 10))
+        
+        # Preview image label
+        self.preview_label = ttk.Label(preview_frame, text="Loading preview...", relief='solid', borderwidth=2)
+        self.preview_label.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        # Preview controls
+        preview_controls = ttk.Frame(preview_frame)
+        preview_controls.pack(fill='x', padx=10, pady=(0, 10))
+        
+        ttk.Button(preview_controls, text="Refresh Preview", command=self.take_snapshot).pack(side='left', padx=(0, 5))
+        ttk.Button(preview_controls, text="Auto Refresh", command=self.toggle_auto_refresh).pack(side='left', padx=5)
+        
+        # Auto refresh state
+        self.auto_refresh = False
+        self.auto_refresh_var = tk.BooleanVar(value=False)
+        self.auto_refresh_check = ttk.Checkbutton(preview_controls, text="Auto", variable=self.auto_refresh_var, 
+                                                 command=self.toggle_auto_refresh)
+        self.auto_refresh_check.pack(side='left', padx=5)
+        
         # Buttons frame
-        button_frame = ttk.Frame(main_frame)
+        button_frame = ttk.Frame(left_frame)
         button_frame.pack(fill='x', pady=(10, 0))
         
-        ttk.Button(button_frame, text="Apply Settings", command=self.apply_settings).pack(side='left', padx=(0, 5))
+        ttk.Button(button_frame, text="Quick Apply", command=self.quick_apply).pack(side='left', padx=(0, 5))
+        ttk.Button(button_frame, text="Apply Settings", command=self.apply_settings).pack(side='left', padx=5)
         ttk.Button(button_frame, text="Save Settings", command=self.save_settings).pack(side='left', padx=5)
         ttk.Button(button_frame, text="Load Settings", command=self.load_settings).pack(side='left', padx=5)
         ttk.Button(button_frame, text="Reset to Default", command=self.reset_settings).pack(side='left', padx=5)
@@ -266,8 +300,9 @@ class CameraSettingsDialog:
             var = tk.DoubleVar(value=current_value)
             self.settings_vars[prop_name] = var
             
-            # Scale
-            scale = ttk.Scale(frame, from_=0, to=100, variable=var, orient='horizontal')
+            # Scale with callback to refresh preview
+            scale = ttk.Scale(frame, from_=0, to=100, variable=var, orient='horizontal', 
+                            command=lambda val, prop=prop_name: self.on_setting_changed(prop, val))
             scale.grid(row=0, column=1, sticky='ew', padx=(0, 5))
             
             # Entry for precise value
@@ -284,7 +319,8 @@ class CameraSettingsDialog:
             
             if isinstance(current_value, bool):
                 # Boolean - use checkbox
-                checkbox = ttk.Checkbutton(frame, text="Enabled", variable=var, onvalue="True", offvalue="False")
+                checkbox = ttk.Checkbutton(frame, text="Enabled", variable=var, onvalue="True", offvalue="False",
+                                         command=lambda prop=prop_name: self.on_setting_changed(prop, var.get()))
                 checkbox.grid(row=0, column=1, sticky='w', padx=(0, 5))
             else:
                 # String or other - use entry
@@ -296,6 +332,47 @@ class CameraSettingsDialog:
         
         # Configure grid weights
         frame.columnconfigure(1, weight=1)
+    
+    def on_setting_changed(self, prop_name, value):
+        """Called when a setting is changed - can be used for live preview updates"""
+        # This could be used for live preview updates in the future
+        pass
+    
+    def quick_apply(self):
+        """Quick apply settings without showing success message, just refresh preview"""
+        try:
+            settings = {}
+            for prop_name, var in self.settings_vars.items():
+                try:
+                    value = var.get()
+                    # Convert string values to appropriate types
+                    if isinstance(value, str):
+                        if value.lower() in ['true', 'false']:
+                            value = value.lower() == 'true'
+                        else:
+                            try:
+                                value = float(value)
+                                if value.is_integer():
+                                    value = int(value)
+                            except ValueError:
+                                pass
+                    settings[prop_name] = value
+                except Exception as e:
+                    print(f"Error getting value for {prop_name}: {e}")
+            
+            # URL encode the device path
+            import urllib.parse
+            encoded_device = urllib.parse.quote(self.device, safe='')
+            url = f"{self.pi_host}/camera_settings?device={encoded_device}"
+            response = requests.post(url, json={'settings': settings}, timeout=5)
+            
+            if response.status_code == 200:
+                # Just refresh preview without showing message
+                self.take_snapshot()
+            else:
+                messagebox.showerror("Error", f"Failed to apply settings: {response.text}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to apply settings: {str(e)}")
     
     def apply_settings(self):
         """Apply current settings to the camera"""
@@ -329,6 +406,8 @@ class CameraSettingsDialog:
                 messagebox.showinfo("Success", "Camera settings applied successfully")
                 # Reload properties to show updated values
                 self.load_properties()
+                # Refresh preview to show the effect of new settings
+                self.take_snapshot()
             else:
                 messagebox.showerror("Error", f"Failed to apply settings: {response.text}")
         except Exception as e:
@@ -406,6 +485,60 @@ class CameraSettingsDialog:
                     self.settings_vars[prop_name].set(value)
                 except Exception as e:
                     print(f"Error setting value for {prop_name}: {e}")
+    
+    def take_snapshot(self):
+        """Take a snapshot from the camera and display it"""
+        try:
+            # Convert device path to camera index for snapshot
+            if self.device.startswith('/dev/video'):
+                camera_index = self.device.replace('/dev/video', '')
+            else:
+                camera_index = self.device
+            
+            url = f"{self.pi_host}/snapshot/{camera_index}"
+            response = requests.get(url, timeout=5)
+            
+            if response.status_code == 200:
+                # Load and resize image
+                image = Image.open(io.BytesIO(response.content))
+                
+                # Resize to fit preview area (maintain aspect ratio)
+                preview_width = 320
+                preview_height = 240
+                image.thumbnail((preview_width, preview_height), Image.Resampling.LANCZOS)
+                
+                # Convert to PhotoImage
+                photo = ImageTk.PhotoImage(image)
+                
+                # Update preview label
+                self.preview_label.config(image=photo, text="")
+                self.preview_label.image = photo  # Keep a reference
+                self.preview_image = photo
+                
+            else:
+                self.preview_label.config(text=f"Error: {response.status_code}")
+                
+        except Exception as e:
+            self.preview_label.config(text=f"Error: {str(e)}")
+    
+    def toggle_auto_refresh(self):
+        """Toggle auto refresh mode"""
+        self.auto_refresh = self.auto_refresh_var.get()
+        if self.auto_refresh:
+            self.start_auto_refresh()
+        else:
+            self.stop_auto_refresh()
+    
+    def start_auto_refresh(self):
+        """Start auto refresh timer"""
+        if self.auto_refresh:
+            self.take_snapshot()
+            # Schedule next refresh in 2 seconds
+            self.dialog.after(2000, self.start_auto_refresh)
+    
+    def stop_auto_refresh(self):
+        """Stop auto refresh"""
+        self.auto_refresh = False
     
     def reset_settings(self):
         """Reset settings to default values"""
