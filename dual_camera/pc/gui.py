@@ -415,15 +415,15 @@ class PiTab:
     
     def setup_tab(self):
         # Main layout with two columns
-        main_frame = ttk.Frame(self.parent)
-        main_frame.pack(fill='both', expand=True)
+        self.main_frame = ttk.Frame(self.parent)
+        self.main_frame.pack(fill='both', expand=True)
         
         # Left side: Controls
-        left_frame = ttk.Frame(main_frame)
+        left_frame = ttk.Frame(self.main_frame)
         left_frame.pack(side='left', fill='both', expand=True, padx=(0, 5))
         
         # Right side: Camera snapshots
-        right_frame = ttk.Frame(main_frame)
+        right_frame = ttk.Frame(self.main_frame)
         right_frame.pack(side='right', fill='both', expand=True, padx=(5, 0))
         
         # Left side: Controls
@@ -827,7 +827,7 @@ class PiControllerGUI:
         for idx, pi in enumerate(self.pis):
             tab = PiTab(self.notebook, pi, idx, self)
             tab_name = pi.get('name', pi.get('username', f'Pi-{idx}'))
-            self.notebook.add(tab.frame, text=tab_name)
+            self.notebook.add(tab.main_frame, text=tab_name)
             self.tabs[idx] = tab
         
         # If no Pis, show a welcome tab
