@@ -168,10 +168,15 @@ def list_cameras():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/camera_properties/<device>', methods=['GET'])
+@app.route('/camera_properties/<path:device>', methods=['GET'])
 def get_camera_properties_route(device):
     """Get available camera properties for a specific device"""
     try:
+        # URL decode the device path
+        import urllib.parse
+        device = urllib.parse.unquote(device)
+        print(f"Getting properties for device: {device}")
+        
         properties = get_camera_properties(device)
         if properties is not None:
             return jsonify({'properties': properties}), 200
@@ -180,20 +185,30 @@ def get_camera_properties_route(device):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/camera_settings/<device>', methods=['GET'])
+@app.route('/camera_settings/<path:device>', methods=['GET'])
 def get_camera_settings_route(device):
     """Get current camera settings for a specific device"""
     try:
+        # URL decode the device path
+        import urllib.parse
+        device = urllib.parse.unquote(device)
+        print(f"Getting settings for device: {device}")
+        
         settings = load_camera_settings()
         device_settings = settings.get(device, {})
         return jsonify({'settings': device_settings}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/camera_settings/<device>', methods=['POST'])
+@app.route('/camera_settings/<path:device>', methods=['POST'])
 def set_camera_settings_route(device):
     """Set camera settings for a specific device"""
     try:
+        # URL decode the device path
+        import urllib.parse
+        device = urllib.parse.unquote(device)
+        print(f"Setting settings for device: {device}")
+        
         data = request.json
         settings = data.get('settings', {})
         
