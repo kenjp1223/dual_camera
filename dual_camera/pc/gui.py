@@ -204,7 +204,10 @@ class CameraSettingsDialog:
     def load_properties(self):
         """Load available camera properties from the Pi"""
         try:
-            url = f"{self.pi_host}/camera_properties/{self.device}"
+            # URL encode the device path
+            import urllib.parse
+            encoded_device = urllib.parse.quote(self.device, safe='')
+            url = f"{self.pi_host}/camera_properties/{encoded_device}"
             response = requests.get(url, timeout=5)
             if response.status_code == 200:
                 self.properties = response.json().get('properties', {})
@@ -316,7 +319,10 @@ class CameraSettingsDialog:
                 except Exception as e:
                     print(f"Error getting value for {prop_name}: {e}")
             
-            url = f"{self.pi_host}/camera_settings/{self.device}"
+            # URL encode the device path
+            import urllib.parse
+            encoded_device = urllib.parse.quote(self.device, safe='')
+            url = f"{self.pi_host}/camera_settings/{encoded_device}"
             response = requests.post(url, json={'settings': settings}, timeout=5)
             
             if response.status_code == 200:
@@ -366,7 +372,10 @@ class CameraSettingsDialog:
         """Load settings from file or from Pi"""
         try:
             # First try to load from Pi
-            url = f"{self.pi_host}/camera_settings/{self.device}"
+            # URL encode the device path
+            import urllib.parse
+            encoded_device = urllib.parse.quote(self.device, safe='')
+            url = f"{self.pi_host}/camera_settings/{encoded_device}"
             response = requests.get(url, timeout=5)
             
             if response.status_code == 200:
