@@ -1,29 +1,91 @@
+import cv2
 import argparse
 import os
-import subprocess
 import time
+import subprocess
 import threading
-import signal
-import sys
 from datetime import datetime
-import cv2
-import shutil
+import json
 
-# GPIO setup for LED trigger
+# GPIO setup for LED indicator
 try:
     import RPi.GPIO as GPIO
     HAS_GPIO = True
+    LED_PIN = 18  # GPIO18
 except ImportError:
     HAS_GPIO = False
-
-LED_PIN = 17
+    print("GPIO not available - LED indicator disabled")
 
 def set_led(state):
+    """Set LED state (if GPIO available)"""
     if HAS_GPIO:
-        print(f"[DEBUG] Setting LED {'ON' if state else 'OFF'} on GPIO{LED_PIN}")
         GPIO.output(LED_PIN, GPIO.HIGH if state else GPIO.LOW)
-    else:
-        print(f"[DEBUG] GPIO not available, LED {'ON' if state else 'OFF'} requested")
+
+def apply_camera_settings(device, settings):
+    """Apply camera settings using v4l2-ctl"""
+    if not settings:
+        return True
+    
+    try:
+        # Convert device path to device number
+        if device.startswith('/dev/video'):
+            device_num = device.replace('/dev/video', '')
+        else:
+            device_num = device
+        
+        # Property mapping for v4l2-ctl
+        v4l2_props = {
+            'exposure': 'exposure_absolute',
+            'gain': 'gain',
+            'brightness': 'brightness',
+            'contrast': 'contrast',
+            'saturation': 'saturation',
+            'hue': 'hue',
+            'white_balance_blue_u': 'white_balance_blue_u',
+            'white_balance_red_v': 'white_balance_red_v',
+            'gamma': 'gamma',
+            'backlight': 'backlight_compensation',
+            'auto_exposure': 'exposure_auto',
+            'focus': 'focus_absolute',
+            'auto_focus': 'focus_auto',
+            'zoom': 'zoom_absolute',
+            'pan': 'pan_absolute',
+            'tilt': 'tilt_absolute',
+            'roll': 'roll_absolute',
+            'iris': 'iris_absolute'
+        }
+        
+        success_count = 0
+        for prop_name, value in settings.items():
+            if prop_name in v4l2_props:
+                v4l2_prop = v4l2_props[prop_name]
+                try:
+                    # Use v4l2-ctl to set the property
+                    cmd = ['v4l2-ctl', '-d', f'/dev/video{device_num}', '-c', f'{v4l2_prop}={value}']
+                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+                    if result.returncode == 0:
+                        success_count += 1
+                        print(f"Set {v4l2_prop}={value} for {device}")
+                    else:
+                        print(f"Failed to set {v4l2_prop}={value} for {device}: {result.stderr}")
+                except Exception as e:
+                    print(f"Error setting {v4l2_prop} for {device}: {e}")
+        
+        return success_count > 0
+    except Exception as e:
+        print(f"Error applying camera settings for {device}: {e}")
+        return False
+
+def load_camera_settings():
+    """Load camera settings from JSON file"""
+    settings_file = 'camera_settings.json'
+    if os.path.exists(settings_file):
+        try:
+            with open(settings_file, 'r') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Error loading camera settings: {e}")
+    return {}
 
 def pre_warm_camera(device, duration=2):
     """Pre-warm camera to ensure it's ready for recording"""
@@ -50,13 +112,22 @@ def pre_warm_camera(device, duration=2):
         return False
 
 def flush_camera(device, num_frames=10):
-    """Flush camera buffer by grabbing and discarding a few frames."""
+    """Flush camera buffer by reading a few frames"""
     try:
         print(f"Flushing camera buffer for {device}...")
-        cap = cv2.VideoCapture(device)
-        for _ in range(num_frames):
-            cap.read()
-        cap.release()
+        # Use ffmpeg to flush buffer
+        flush_cmd = [
+            "ffmpeg",
+            "-f", "v4l2",
+            "-input_format", "mjpeg",
+            "-i", device,
+            "-frames:v", str(num_frames),
+            "-f", "null",
+            "-"
+        ]
+        
+        flush_process = subprocess.Popen(flush_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        flush_process.wait()
         print(f"Camera {device} buffer flushed.")
     except Exception as e:
         print(f"Warning: Failed to flush buffer for {device}: {e}")
@@ -220,6 +291,24 @@ def main():
     print(f"Cam0: {args.cam0} -> {cam0_out}")
     print(f"Cam1: {args.cam1} -> {cam1_out}")
 
+    # Load and apply camera settings
+    print("Loading camera settings...")
+    settings = load_camera_settings()
+    
+    if args.cam0 in settings:
+        print(f"Applying settings to {args.cam0}...")
+        if apply_camera_settings(args.cam0, settings[args.cam0]):
+            print(f"Settings applied to {args.cam0}")
+        else:
+            print(f"Warning: Failed to apply settings to {args.cam0}")
+    
+    if args.cam1 in settings:
+        print(f"Applying settings to {args.cam1}...")
+        if apply_camera_settings(args.cam1, settings[args.cam1]):
+            print(f"Settings applied to {args.cam1}")
+        else:
+            print(f"Warning: Failed to apply settings to {args.cam1}")
+
     # Pre-warm cameras if enabled
     if args.pre_warm:
         print("Pre-warming cameras...")
@@ -266,42 +355,48 @@ def main():
     cmd1 = build_ffmpeg_command_time(args.cam1, cam1_out, args.width, args.height, args.fps, record_duration, args.sync_mode, args.add_timestamp)
 
     print("Starting synchronized recording...")
-    start_time = time.time()
-
-    # Start synchronized recording
     processes = synchronized_recording(cmd0, cmd1, None, args.fps, record_duration)
 
-    elapsed = time.time() - start_time
-    print(f"Recording completed. Elapsed time: {elapsed:.2f} seconds")
-    print(f"Expected duration: {record_duration} s")
-
-    # Check if both processes completed successfully
-    for process, camera_name in processes:
-        if process.returncode != 0:
-            print(f"Warning: {camera_name} exited with code {process.returncode}")
-        else:
-            print(f"{camera_name} completed successfully")
-
-    # Verify output files
-    if os.path.exists(cam0_out) and os.path.exists(cam1_out):
-        print("Both output files created successfully")
-    else:
-        print("Error: One or both output files missing")
-
-    # After recording, move files from RAM disk to final output directory
+    # Move files from RAM disk to final location
     final_save_dir = os.path.join(args.output_dir, f'record_{args.subject}_{timestamp}')
-    os.makedirs(final_save_dir, exist_ok=True)
     try:
+        os.makedirs(final_save_dir, exist_ok=True)
+        
+        # Move files
+        import shutil
         shutil.move(cam0_out, os.path.join(final_save_dir, "cam0.mp4"))
         shutil.move(cam1_out, os.path.join(final_save_dir, "cam1.mp4"))
-        print(f"Files moved to {final_save_dir}")
-        # Optionally, remove the now-empty RAM disk directory
-        try:
-            os.rmdir(ramdisk_save_dir)
-        except Exception:
-            pass
+        
+        # Clean up RAM disk directory
+        os.rmdir(ramdisk_save_dir)
+        
+        print(f"Recording complete. Files saved to: {final_save_dir}")
+        
+        # Analyze synchronization
+        cam0_path = os.path.join(final_save_dir, "cam0.mp4")
+        cam1_path = os.path.join(final_save_dir, "cam1.mp4")
+        
+        if os.path.exists(cam0_path) and os.path.exists(cam1_path):
+            print("\n--- Synchronization Analysis ---")
+            first0, last0 = get_first_last_frame_timestamps(cam0_path)
+            first1, last1 = get_first_last_frame_timestamps(cam1_path)
+            
+            if first0 is not None and first1 is not None:
+                sync_diff = abs(first0 - first1)
+                print(f"Start time difference: {sync_diff:.3f} seconds")
+                if sync_diff < 0.1:
+                    print("✓ Cameras appear to be well synchronized")
+                else:
+                    print("⚠ Cameras may have synchronization issues")
+            
+            # Get file sizes
+            size0 = os.path.getsize(cam0_path) / (1024*1024)  # MB
+            size1 = os.path.getsize(cam1_path) / (1024*1024)  # MB
+            print(f"File sizes: cam0={size0:.1f}MB, cam1={size1:.1f}MB")
+        
     except Exception as e:
-        print(f"Error moving files from RAM disk: {e}")
+        print(f"Error moving files: {e}")
+        print(f"Files may still be in RAM disk: {ramdisk_save_dir}")
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

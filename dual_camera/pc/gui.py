@@ -140,22 +140,291 @@ class NetworkScanner:
         """Main scanning method - optimized for direct ethernet connections"""
         return self.scan_direct_ethernet(progress_callback)
 
+class CameraSettingsDialog:
+    def __init__(self, parent, pi_host, device):
+        self.dialog = tk.Toplevel(parent)
+        self.dialog.title(f"Camera Settings - {device}")
+        self.dialog.geometry("600x700")
+        self.dialog.transient(parent)
+        self.dialog.grab_set()
+        
+        self.pi_host = pi_host
+        self.device = device
+        self.settings_vars = {}
+        self.properties = {}
+        
+        self.setup_ui()
+        self.load_properties()
+        self.load_settings()
+    
+    def setup_ui(self):
+        # Main frame
+        main_frame = ttk.Frame(self.dialog)
+        main_frame.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        # Device info
+        info_frame = ttk.LabelFrame(main_frame, text="Device Information")
+        info_frame.pack(fill='x', pady=(0, 10))
+        ttk.Label(info_frame, text=f"Device: {self.device}").pack(anchor='w', padx=5, pady=2)
+        ttk.Label(info_frame, text=f"Host: {self.pi_host}").pack(anchor='w', padx=5, pady=2)
+        
+        # Settings frame with scrollbar
+        settings_frame = ttk.LabelFrame(main_frame, text="Camera Settings")
+        settings_frame.pack(fill='both', expand=True, pady=(0, 10))
+        
+        # Create canvas with scrollbar
+        canvas = tk.Canvas(settings_frame)
+        scrollbar = ttk.Scrollbar(settings_frame, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+        
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Settings will be added here dynamically
+        self.settings_container = scrollable_frame
+        
+        # Buttons frame
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill='x', pady=(10, 0))
+        
+        ttk.Button(button_frame, text="Apply Settings", command=self.apply_settings).pack(side='left', padx=(0, 5))
+        ttk.Button(button_frame, text="Save Settings", command=self.save_settings).pack(side='left', padx=5)
+        ttk.Button(button_frame, text="Load Settings", command=self.load_settings).pack(side='left', padx=5)
+        ttk.Button(button_frame, text="Reset to Default", command=self.reset_settings).pack(side='left', padx=5)
+        ttk.Button(button_frame, text="Close", command=self.dialog.destroy).pack(side='right', padx=(5, 0))
+    
+    def load_properties(self):
+        """Load available camera properties from the Pi"""
+        try:
+            url = f"{self.pi_host}/camera_properties/{self.device}"
+            response = requests.get(url, timeout=5)
+            if response.status_code == 200:
+                self.properties = response.json().get('properties', {})
+                self.create_settings_controls()
+            else:
+                messagebox.showerror("Error", f"Failed to load camera properties: {response.text}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to connect to camera: {str(e)}")
+    
+    def create_settings_controls(self):
+        """Create UI controls for each camera property"""
+        # Clear existing controls
+        for widget in self.settings_container.winfo_children():
+            widget.destroy()
+        
+        self.settings_vars = {}
+        
+        if not self.properties:
+            ttk.Label(self.settings_container, text="No camera properties available").pack(pady=10)
+            return
+        
+        # Group properties by category
+        categories = {
+            'Exposure & Gain': ['exposure', 'gain', 'auto_exposure', 'auto_gain'],
+            'Image Quality': ['brightness', 'contrast', 'saturation', 'gamma'],
+            'Color': ['hue', 'white_balance_blue_u', 'white_balance_red_v'],
+            'Focus & Zoom': ['focus', 'auto_focus', 'zoom'],
+            'Advanced': ['backlight', 'pan', 'tilt', 'roll', 'iris', 'settings']
+        }
+        
+        for category, props in categories.items():
+            # Only show categories that have available properties
+            available_props = [p for p in props if p in self.properties]
+            if not available_props:
+                continue
+            
+            # Category frame
+            cat_frame = ttk.LabelFrame(self.settings_container, text=category)
+            cat_frame.pack(fill='x', pady=5, padx=5)
+            
+            for prop in available_props:
+                value = self.properties[prop]
+                self.create_property_control(cat_frame, prop, value)
+    
+    def create_property_control(self, parent, prop_name, current_value):
+        """Create a control for a single camera property"""
+        frame = ttk.Frame(parent)
+        frame.pack(fill='x', padx=5, pady=2)
+        
+        # Property name
+        ttk.Label(frame, text=f"{prop_name.replace('_', ' ').title()}:").grid(row=0, column=0, sticky='w', padx=(0, 10))
+        
+        # Create appropriate control based on property type
+        if isinstance(current_value, (int, float)):
+            # Numeric value - use scale and entry
+            var = tk.DoubleVar(value=current_value)
+            self.settings_vars[prop_name] = var
+            
+            # Scale
+            scale = ttk.Scale(frame, from_=0, to=100, variable=var, orient='horizontal')
+            scale.grid(row=0, column=1, sticky='ew', padx=(0, 5))
+            
+            # Entry for precise value
+            entry = ttk.Entry(frame, textvariable=var, width=10)
+            entry.grid(row=0, column=2, padx=(0, 5))
+            
+            # Current value label
+            ttk.Label(frame, text=f"Current: {current_value:.2f}").grid(row=0, column=3, sticky='w')
+            
+        else:
+            # Boolean or other - use checkbox or entry
+            var = tk.StringVar(value=str(current_value))
+            self.settings_vars[prop_name] = var
+            
+            if isinstance(current_value, bool):
+                # Boolean - use checkbox
+                checkbox = ttk.Checkbutton(frame, text="Enabled", variable=var, onvalue="True", offvalue="False")
+                checkbox.grid(row=0, column=1, sticky='w', padx=(0, 5))
+            else:
+                # String or other - use entry
+                entry = ttk.Entry(frame, textvariable=var, width=15)
+                entry.grid(row=0, column=1, sticky='w', padx=(0, 5))
+            
+            # Current value label
+            ttk.Label(frame, text=f"Current: {current_value}").grid(row=0, column=2, sticky='w')
+        
+        # Configure grid weights
+        frame.columnconfigure(1, weight=1)
+    
+    def apply_settings(self):
+        """Apply current settings to the camera"""
+        try:
+            settings = {}
+            for prop_name, var in self.settings_vars.items():
+                try:
+                    value = var.get()
+                    # Convert string values to appropriate types
+                    if isinstance(value, str):
+                        if value.lower() in ['true', 'false']:
+                            value = value.lower() == 'true'
+                        else:
+                            try:
+                                value = float(value)
+                                if value.is_integer():
+                                    value = int(value)
+                            except ValueError:
+                                pass
+                    settings[prop_name] = value
+                except Exception as e:
+                    print(f"Error getting value for {prop_name}: {e}")
+            
+            url = f"{self.pi_host}/camera_settings/{self.device}"
+            response = requests.post(url, json={'settings': settings}, timeout=5)
+            
+            if response.status_code == 200:
+                messagebox.showinfo("Success", "Camera settings applied successfully")
+                # Reload properties to show updated values
+                self.load_properties()
+            else:
+                messagebox.showerror("Error", f"Failed to apply settings: {response.text}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to apply settings: {str(e)}")
+    
+    def save_settings(self):
+        """Save current settings to file"""
+        try:
+            settings = {}
+            for prop_name, var in self.settings_vars.items():
+                try:
+                    value = var.get()
+                    if isinstance(value, str):
+                        if value.lower() in ['true', 'false']:
+                            value = value.lower() == 'true'
+                        else:
+                            try:
+                                value = float(value)
+                                if value.is_integer():
+                                    value = int(value)
+                            except ValueError:
+                                pass
+                    settings[prop_name] = value
+                except Exception as e:
+                    print(f"Error getting value for {prop_name}: {e}")
+            
+            filename = filedialog.asksaveasfilename(
+                defaultextension=".json",
+                filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+                title="Save Camera Settings"
+            )
+            
+            if filename:
+                with open(filename, 'w') as f:
+                    json.dump({self.device: settings}, f, indent=2)
+                messagebox.showinfo("Success", f"Settings saved to {filename}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save settings: {str(e)}")
+    
+    def load_settings(self):
+        """Load settings from file or from Pi"""
+        try:
+            # First try to load from Pi
+            url = f"{self.pi_host}/camera_settings/{self.device}"
+            response = requests.get(url, timeout=5)
+            
+            if response.status_code == 200:
+                settings = response.json().get('settings', {})
+                self.apply_loaded_settings(settings)
+                return
+            
+            # If no settings on Pi, try to load from file
+            filename = filedialog.askopenfilename(
+                filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+                title="Load Camera Settings"
+            )
+            
+            if filename:
+                with open(filename, 'r') as f:
+                    data = json.load(f)
+                    device_settings = data.get(self.device, {})
+                    self.apply_loaded_settings(device_settings)
+                    messagebox.showinfo("Success", f"Settings loaded from {filename}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to load settings: {str(e)}")
+    
+    def apply_loaded_settings(self, settings):
+        """Apply loaded settings to the UI controls"""
+        for prop_name, value in settings.items():
+            if prop_name in self.settings_vars:
+                try:
+                    self.settings_vars[prop_name].set(value)
+                except Exception as e:
+                    print(f"Error setting value for {prop_name}: {e}")
+    
+    def reset_settings(self):
+        """Reset settings to default values"""
+        if messagebox.askyesno("Reset Settings", "Are you sure you want to reset all settings to default?"):
+            for prop_name, var in self.settings_vars.items():
+                if prop_name in self.properties:
+                    var.set(self.properties[prop_name])
+
 class PiTab:
     def __init__(self, parent, pi_data, pi_index, gui_instance):
         self.parent = parent
         self.pi_data = pi_data
         self.pi_index = pi_index
         self.gui = gui_instance
-        self.frame = ttk.Frame(parent)
         self.setup_tab()
     
     def setup_tab(self):
         # Main layout with two columns
-        left_frame = ttk.Frame(self.frame)
-        left_frame.pack(side='left', fill='both', expand=True, padx=10, pady=10)
+        main_frame = ttk.Frame(self.parent)
+        main_frame.pack(fill='both', expand=True)
         
-        right_frame = ttk.Frame(self.frame)
-        right_frame.pack(side='right', fill='both', expand=True, padx=10, pady=10)
+        # Left side: Controls
+        left_frame = ttk.Frame(main_frame)
+        left_frame.pack(side='left', fill='both', expand=True, padx=(0, 5))
+        
+        # Right side: Camera snapshots
+        right_frame = ttk.Frame(main_frame)
+        right_frame.pack(side='right', fill='both', expand=True, padx=(5, 0))
         
         # Left side: Controls
         self.setup_controls(left_frame)
@@ -255,8 +524,18 @@ class PiTab:
         btn_row3 = ttk.Frame(button_frame)
         btn_row3.pack(fill='x', padx=5, pady=5)
         
-        ttk.Button(btn_row3, text='Remove Pi', command=self.remove_pi).grid(row=0, column=0, padx=2)
+        ttk.Button(btn_row3, text='Cam0 Settings', command=lambda: self.open_camera_settings(self.cam0_var.get())).grid(row=0, column=0, padx=2)
+        ttk.Button(btn_row3, text='Cam1 Settings', command=lambda: self.open_camera_settings(self.cam1_var.get())).grid(row=0, column=1, padx=2)
+        ttk.Button(btn_row3, text='Remove Pi', command=self.remove_pi).grid(row=0, column=2, padx=2)
     
+    def open_camera_settings(self, device):
+        """Open camera settings dialog for the specified device"""
+        if not device:
+            messagebox.showwarning("Warning", "Please select a camera device first")
+            return
+        
+        CameraSettingsDialog(self.parent, self.pi_data['host'], device)
+
     def setup_snapshots(self, parent):
         snapshot_frame = ttk.LabelFrame(parent, text="Camera Snapshots")
         snapshot_frame.pack(fill='both', expand=True)

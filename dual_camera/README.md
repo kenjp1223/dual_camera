@@ -1,6 +1,6 @@
 # Dual Camera Raspberry Pi Setup (multi-device ready)
 
-This guide describes how to set up and control multiple Raspberry Pi devices (e.g., `xxlab1`, `xxlab2`, etc.) for synchronized dual USB camera recording using `ffmpeg`. Recording is triggered remotely from a host PC over Ethernet or Wi-Fi using a comprehensive GUI interface with advanced post-processing capabilities.
+This guide describes how to set up and control multiple Raspberry Pi devices (e.g., `xxlab1`, `xxlab2`, etc.) for synchronized dual USB camera recording using `ffmpeg`. Recording is triggered remotely from a host PC over Ethernet or Wi-Fi using a comprehensive GUI interface with advanced post-processing capabilities and camera settings management.
 
 ---
 
@@ -59,8 +59,10 @@ sudo reboot
 ### ✅ Install Dependencies
 
 ```bash
-sudo apt update && sudo apt install git python3-venv ffmpeg python3-dev -y
+sudo apt update && sudo apt install git python3-venv ffmpeg python3-dev v4l-utils -y
 ```
+
+**Note**: `v4l-utils` is required for camera settings management.
 
 ### ✅ Clone Your Repository
 
@@ -93,60 +95,82 @@ pip install -r requirements.txt
 
 ## 2a. High-Speed Recording with RAM Disk (tmpfs) [Recommended]
 
-To prevent dropped frames and maximize write speed, the recording script writes video files to a RAM disk (tmpfs) during capture, then moves them to permanent storage after recording.
+For high-speed recording, create a RAM disk to avoid SD card write speed limitations:
 
-**If the RAM disk is not set up, the script will exit with an error and instruct you to read this section.**
+```bash
+# Create mount point
+sudo mkdir -p /mnt/ramdisk
 
-### How to Set Up a RAM Disk on Raspberry Pi
+# Add to /etc/fstab (add this line)
+echo "tmpfs /mnt/ramdisk tmpfs defaults,size=2G 0 0" | sudo tee -a /etc/fstab
 
-1. **Edit `/etc/fstab` to add a RAM disk:**
-   ```bash
-   sudo nano /etc/fstab
-   ```
-   Add this line at the end (for a 2GB RAM disk):
-   ```
-   tmpfs   /mnt/ramdisk   tmpfs   defaults,size=2G   0   0
-   ```
-   Adjust `size=2G` as needed (e.g., 1G, 3G).
+# Mount RAM disk
+sudo mount -a
 
-2. **Create the mount point and mount the RAM disk:**
-   ```bash
-   sudo mkdir -p /mnt/ramdisk
-   sudo mount /mnt/ramdisk
-   ```
+# Verify
+df -h /mnt/ramdisk
+```
 
-3. **Verify:**
-   ```bash
-   df -h /mnt/ramdisk
-   ```
-   You should see the correct size and available space.
-
-4. **The RAM disk will now be available at `/mnt/ramdisk` on every boot.**
-
-### How Recording Works with RAM Disk
-
-- During recording, video files are written to `/mnt/ramdisk/record_<subject>_<timestamp>/`.
-- After recording, files are automatically moved to your specified output directory (e.g., `/home/pi/captures`).
-- If the RAM disk is missing or not mounted, the script will print an error and exit.  
-  **Check this section if you see an error about the RAM disk.**
-
-### Why Use a RAM Disk?
-
-- **Much faster write speeds** (prevents dropped frames at high FPS/resolution).
-- **Reduces SD card wear** (important for Pi longevity).
-- **Files are only moved to permanent storage after recording is complete.**
+This creates a 2GB RAM disk. Adjust size as needed (e.g., `size=4G` for 4GB).
 
 ---
 
-## 3. Running the Recording Script Manually
+## 3. Camera Settings Management
 
-### ✅ Test Recording
+### ✅ Camera Settings Overview
 
-The script will write to the RAM disk first, then move files to your output directory after recording. If the RAM disk is not available, you will see an error message with instructions.
+The system now includes comprehensive camera settings management with the following features:
+
+#### **Supported Camera Parameters**
+- **Exposure & Gain**: Manual exposure control, gain adjustment, auto-exposure modes
+- **Image Quality**: Brightness, contrast, saturation, gamma correction
+- **Color Settings**: Hue adjustment, white balance (blue/red channels)
+- **Focus & Zoom**: Manual focus, auto-focus, zoom control
+- **Advanced**: Backlight compensation, pan/tilt/roll, iris control
+
+#### **Settings Persistence**
+- **Automatic Application**: Settings are automatically applied before each recording
+- **JSON Storage**: Settings saved to `camera_settings.json` on each Pi
+- **Import/Export**: Settings can be saved to and loaded from external files
+- **Per-Device Configuration**: Different settings for each camera device
+
+### ✅ Using Camera Settings via PC GUI
+
+1. **Access Settings**: Click "Cam0 Settings" or "Cam1 Settings" buttons in the Pi tab
+2. **Configure Parameters**: Adjust sliders and controls for each camera property
+3. **Apply Settings**: Click "Apply Settings" to immediately apply to the camera
+4. **Save Configuration**: Click "Save Settings" to save to a JSON file
+5. **Load Configuration**: Click "Load Settings" to load from a file or Pi storage
+6. **Reset to Default**: Click "Reset to Default" to restore original values
+
+### ✅ Camera Settings via Command Line
+
+You can also manage camera settings directly on the Pi using `v4l2-ctl`:
 
 ```bash
-source dualcam-venv/bin/activate
-cd /home/<username>/dual_camera/dual_camera/pi
+# List available camera properties
+v4l2-ctl -d /dev/video0 --list-ctrls
+
+# Set exposure
+v4l2-ctl -d /dev/video0 -c exposure_absolute=100
+
+# Set gain
+v4l2-ctl -d /dev/video0 -c gain=50
+
+# Set brightness
+v4l2-ctl -d /dev/video0 -c brightness=128
+
+# Set white balance
+v4l2-ctl -d /dev/video0 -c white_balance_blue_u=128
+v4l2-ctl -d /dev/video0 -c white_balance_red_v=128
+```
+
+### ✅ Testing Camera Settings
+
+Test your camera settings before recording:
+
+```bash
+# Test recording with current settings
 python3 dual_camera_ffmpeg_record.py \
   --duration 10 \
   --fps 100 \
@@ -239,6 +263,13 @@ The PC GUI provides a comprehensive interface for managing multiple Raspberry Pi
 - **Recording Parameters**: Set duration, FPS, resolution, subject name
 - **Start/Stop/Status**: Control recording remotely with status feedback
 
+#### **Camera Settings Management**
+- **Per-Camera Configuration**: Individual settings for cam0 and cam1
+- **Real-time Adjustment**: Apply settings immediately to cameras
+- **Settings Persistence**: Save and load camera configurations
+- **Property Categories**: Organized settings by exposure, quality, color, focus, etc.
+- **Import/Export**: Save settings to files for backup or sharing
+
 #### **Configuration Management**
 - **Per-Pi Settings**: Save individual configurations for each Pi
 - **Config Persistence**: Load/save configurations to JSON files
@@ -274,60 +305,19 @@ The system includes a sophisticated post-processing interface with manual synchr
 - **Width/Height**: Set as percentages (0.1 to 1.0) of original video dimensions
 - **X/Y Offsets**: Position the crop area (0.0 to 0.9 range)
 - **Independent Control**: Different cropping for cam0 and cam1
-- **Preview Integration**: Cropping applied to both preview and final processing
 
-### ✅ Post-Processing Workflow
+#### **Post-Processing Workflow**
+1. **Load Videos**: Select cam0.mp4 and cam1.mp4 from recording folder
+2. **Manual Sync**: Align videos frame-by-frame for perfect synchronization
+3. **Apply Cropping**: Set rectangular cropping parameters for each camera
+4. **Preview Results**: Generate preview snapshots to verify settings
+5. **Process Videos**: Create final synchronized and cropped output
+6. **Save Settings**: Store cropping parameters for future use
 
-#### **Step 1: Manual Synchronization**
-1. Select recording folder containing cam0.mp4 and cam1.mp4
-2. Use frame controls to align videos frame by frame
-3. Set desired final duration
-4. Preview synchronized result
-
-#### **Step 2: Cropping Configuration**
-1. Adjust width, height, and offset for cam0 and cam1
-2. Use preview to see cropping effects
-3. Save cropping settings for reuse
-4. Load previous cropping configurations
-
-#### **Step 3: Video Processing**
-1. Apply synchronization and cropping to create trimmed videos
-2. Concatenate cam0 and cam1 into final merged video
-3. Output files: `cam0_trimmed.mp4`, `cam1_trimmed.mp4`, `merged_video.mp4`
-
-### ✅ Performance Optimizations
-- **RAM Disk Processing**: Temporary files written to RAM for maximum speed
-- **Frame-Accurate Trimming**: Precise video cuts using ffmpeg with re-encoding
-- **Efficient Concatenation**: Optimized merging without redundant processing
-- **Progress Tracking**: Real-time updates during processing
-
-### ✅ Using Post-Processing
-
-#### **Via GUI**
-1. Click "Post Process" on any Pi tab to launch manual sync GUI
-2. Select recording folder containing cam0.mp4 and cam1.mp4
-3. Synchronize videos frame by frame
-4. Configure cropping settings for both cameras
-5. Preview results before processing
-6. Click "Process Videos" for final output
-
-#### **Via Command Line**
-
-```bash
-# Launch manual sync GUI
-python post_process_videos.py
-
-# Process with specific settings
-python post_process_videos.py /path/to/recording/folder
-
-# List available recording folders
-python post_process_videos.py /path/to/captures --list-folders
-```
-
-### ✅ Output Files
-
-- **Synchronized Videos**: `cam0_trimmed.mp4`, `cam1_trimmed.mp4` (cropped and duration-trimmed)
-- **Final Merged Video**: `merged_video.mp4` (concatenated result)
+#### **Output Files**
+- **cam0_trimmed.mp4**: Synchronized and cropped cam0 video
+- **cam1_trimmed.mp4**: Synchronized and cropped cam1 video
+- **combined.mp4**: Side-by-side or stacked final output
 - **Cropping Settings**: Saved configurations for reuse
 - **Preview Snapshots**: JPG previews with cropping applied
 
@@ -363,12 +353,28 @@ chmod +x start_camera_server.sh
 1. **Setup**: Configure multiple Pis with static IPs (192.168.2.11, .12, .13, etc.)
 2. **Discovery**: Launch PC GUI and scan for Pis on network
 3. **Configuration**: Set recording parameters and camera assignments per Pi
-4. **Recording**: Start synchronized recording across all Pis
-5. **Monitoring**: View live snapshots and recording status
-6. **Post-Processing**: Use manual sync GUI for frame alignment and cropping
-7. **Analysis**: Use the final synchronized and cropped videos for analysis
+4. **Camera Settings**: Configure exposure, gain, white balance, and other parameters
+5. **Recording**: Start synchronized recording across all Pis with applied settings
+6. **Monitoring**: View live snapshots and recording status
+7. **Post-Processing**: Use manual sync GUI for frame alignment and cropping
+8. **Analysis**: Use the final synchronized and cropped videos for analysis
+
+### ✅ Camera Settings Workflow
+
+1. **Access Settings**: Open camera settings dialog for cam0 or cam1
+2. **Configure Parameters**: Adjust exposure, gain, brightness, contrast, etc.
+3. **Apply Settings**: Click "Apply Settings" to test on camera
+4. **Save Configuration**: Save settings to file for backup
+5. **Verify**: Take snapshots to verify settings look correct
+6. **Record**: Start recording - settings are automatically applied
 
 ### ✅ Troubleshooting
+
+#### **Camera Settings Issues**
+- **Settings Not Applied**: Check if camera supports the parameter using `v4l2-ctl --list-ctrls`
+- **Settings Reset**: Some cameras reset settings on disconnect - reapply before recording
+- **Parameter Range**: Use `v4l2-ctl -d /dev/videoX --list-ctrls` to see valid ranges
+- **Camera Compatibility**: Not all USB cameras support all parameters
 
 #### **Synchronization Issues**
 - Use manual sync GUI for frame-by-frame alignment
@@ -398,12 +404,12 @@ You now have a complete multi-device recording system where each Pi:
 
 * Has a unique name and static IP
 * Can be controlled remotely via PC GUI
+* Supports comprehensive camera settings management
 * Records synced dual-camera video to local storage
-* Supports real-time monitoring and advanced post-processing
-* Includes manual synchronization, cropping, and preview capabilities
-* Features a modern 2-column interface for easy cropping comparison
+* Applies saved camera settings automatically before recording
+* Provides advanced post-processing with manual sync and cropping
 
-The system scales from 1-2 Pis to 8+ devices with the tabbed interface, making it suitable for both small experiments and large-scale data collection.
+The system is now ready for high-quality, synchronized dual-camera recording with full camera parameter control and professional post-processing capabilities.
 
 Feel free to extend with:
 

@@ -1,0 +1,34 @@
+{
+  "/dev/video0": {
+    "exposure": 100,
+    "gain": 50,
+    "brightness": 128,
+    "contrast": 128,
+    "saturation": 128,
+    "hue": 0,
+    "white_balance_blue_u": 128,
+    "white_balance_red_v": 128,
+    "gamma": 128,
+    "backlight": 0,
+    "auto_exposure": 1,
+    "focus": 0,
+    "auto_focus": 1,
+    "zoom": 100
+  },
+  "/dev/video2": {
+    "exposure": 120,
+    "gain": 60,
+    "brightness": 135,
+    "contrast": 140,
+    "saturation": 125,
+    "hue": 5,
+    "white_balance_blue_u": 130,
+    "white_balance_red_v": 125,
+    "gamma": 130,
+    "backlight": 1,
+    "auto_exposure": 0,
+    "focus": 50,
+    "auto_focus": 0,
+    "zoom": 110
+  }
+} 
