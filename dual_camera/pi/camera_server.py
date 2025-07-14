@@ -37,8 +37,22 @@ def save_camera_settings(settings):
 def get_camera_properties(device):
     """Get available camera properties for a device"""
     try:
-        cap = cv2.VideoCapture(device)
+        print(f"DEBUG: Opening camera with device: '{device}'")
+        
+        # Try to convert device path to index if it's a /dev/video* path
+        if device.startswith('/dev/video'):
+            try:
+                device_index = int(device.replace('/dev/video', ''))
+                print(f"DEBUG: Converting to device index: {device_index}")
+                cap = cv2.VideoCapture(device_index)
+            except ValueError:
+                print(f"DEBUG: Could not convert device path to index, using path directly")
+                cap = cv2.VideoCapture(device)
+        else:
+            cap = cv2.VideoCapture(device)
+            
         if not cap.isOpened():
+            print(f"DEBUG: Failed to open camera '{device}'")
             return None
         
         properties = {}
@@ -84,8 +98,22 @@ def get_camera_properties(device):
 def set_camera_properties(device, properties):
     """Set camera properties for a device"""
     try:
-        cap = cv2.VideoCapture(device)
+        print(f"DEBUG: Setting properties for device: '{device}'")
+        
+        # Try to convert device path to index if it's a /dev/video* path
+        if device.startswith('/dev/video'):
+            try:
+                device_index = int(device.replace('/dev/video', ''))
+                print(f"DEBUG: Converting to device index: {device_index}")
+                cap = cv2.VideoCapture(device_index)
+            except ValueError:
+                print(f"DEBUG: Could not convert device path to index, using path directly")
+                cap = cv2.VideoCapture(device)
+        else:
+            cap = cv2.VideoCapture(device)
+            
         if not cap.isOpened():
+            print(f"DEBUG: Failed to open camera '{device}' for setting properties")
             return False
         
         prop_mapping = {
