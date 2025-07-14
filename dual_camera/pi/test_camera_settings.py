@@ -43,7 +43,7 @@ def test_endpoints(host="http://localhost:5000"):
                 import urllib.parse
                 encoded_device = urllib.parse.quote(device, safe='')
                 
-                response = requests.get(f"{host}/camera_properties/{encoded_device}", timeout=5)
+                response = requests.get(f"{host}/camera_properties?device={encoded_device}", timeout=5)
                 print(f"Status: {response.status_code}")
                 if response.status_code == 200:
                     properties = response.json().get('properties', {})
@@ -73,7 +73,7 @@ def test_endpoints(host="http://localhost:5000"):
                 import urllib.parse
                 encoded_device = urllib.parse.quote(device, safe='')
                 
-                response = requests.get(f"{host}/camera_settings/{encoded_device}", timeout=5)
+                response = requests.get(f"{host}/camera_settings?device={encoded_device}", timeout=5)
                 print(f"Status: {response.status_code}")
                 if response.status_code == 200:
                     settings = response.json().get('settings', {})
@@ -121,7 +121,7 @@ def test_endpoints(host="http://localhost:5000"):
                 # Test setting brightness to 128
                 test_settings = {'brightness': 128}
                 response = requests.post(
-                    f"{host}/camera_settings/{encoded_device}",
+                    f"{host}/camera_settings?device={encoded_device}",
                     json={'settings': test_settings},
                     timeout=5
                 )

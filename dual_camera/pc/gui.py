@@ -207,7 +207,7 @@ class CameraSettingsDialog:
             # URL encode the device path
             import urllib.parse
             encoded_device = urllib.parse.quote(self.device, safe='')
-            url = f"{self.pi_host}/camera_properties/{encoded_device}"
+            url = f"{self.pi_host}/camera_properties?device={encoded_device}"
             response = requests.get(url, timeout=5)
             if response.status_code == 200:
                 self.properties = response.json().get('properties', {})
@@ -322,7 +322,7 @@ class CameraSettingsDialog:
             # URL encode the device path
             import urllib.parse
             encoded_device = urllib.parse.quote(self.device, safe='')
-            url = f"{self.pi_host}/camera_settings/{encoded_device}"
+            url = f"{self.pi_host}/camera_settings?device={encoded_device}"
             response = requests.post(url, json={'settings': settings}, timeout=5)
             
             if response.status_code == 200:
@@ -375,7 +375,7 @@ class CameraSettingsDialog:
             # URL encode the device path
             import urllib.parse
             encoded_device = urllib.parse.quote(self.device, safe='')
-            url = f"{self.pi_host}/camera_settings/{encoded_device}"
+            url = f"{self.pi_host}/camera_settings?device={encoded_device}"
             response = requests.get(url, timeout=5)
             
             if response.status_code == 200:

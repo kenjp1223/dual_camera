@@ -196,14 +196,22 @@ def list_cameras():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/camera_properties/<path:device>', methods=['GET'])
-def get_camera_properties_route(device):
+@app.route('/camera_properties', methods=['GET'])
+def get_camera_properties_route():
     """Get available camera properties for a specific device"""
     try:
+        device = request.args.get('device')
+        if not device:
+            return jsonify({'error': 'Device parameter is required'}), 400
+            
+        print(f"DEBUG: Raw device parameter received: '{device}'")
+        
         # URL decode the device path
         import urllib.parse
+        original_device = device
         device = urllib.parse.unquote(device)
-        print(f"Getting properties for device: {device}")
+        print(f"DEBUG: After URL decode: '{device}'")
+        print(f"DEBUG: Getting properties for device: '{device}'")
         
         properties = get_camera_properties(device)
         if properties is not None:
@@ -211,12 +219,17 @@ def get_camera_properties_route(device):
         else:
             return jsonify({'error': f'Cannot access camera {device}'}), 500
     except Exception as e:
+        print(f"DEBUG: Exception in get_camera_properties_route: {e}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/camera_settings/<path:device>', methods=['GET'])
-def get_camera_settings_route(device):
+@app.route('/camera_settings', methods=['GET'])
+def get_camera_settings_route():
     """Get current camera settings for a specific device"""
     try:
+        device = request.args.get('device')
+        if not device:
+            return jsonify({'error': 'Device parameter is required'}), 400
+            
         # URL decode the device path
         import urllib.parse
         device = urllib.parse.unquote(device)
@@ -228,10 +241,14 @@ def get_camera_settings_route(device):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/camera_settings/<path:device>', methods=['POST'])
-def set_camera_settings_route(device):
+@app.route('/camera_settings', methods=['POST'])
+def set_camera_settings_route():
     """Set camera settings for a specific device"""
     try:
+        device = request.args.get('device')
+        if not device:
+            return jsonify({'error': 'Device parameter is required'}), 400
+            
         # URL decode the device path
         import urllib.parse
         device = urllib.parse.unquote(device)
