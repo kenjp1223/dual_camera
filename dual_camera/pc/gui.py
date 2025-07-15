@@ -231,7 +231,8 @@ class CameraSettingsDialog:
         ttk.Button(button_frame, text="Quick Apply", command=self.quick_apply).pack(side='left', padx=(0, 5))
         ttk.Button(button_frame, text="Apply Settings", command=self.apply_settings).pack(side='left', padx=5)
         ttk.Button(button_frame, text="Save Settings", command=self.save_settings).pack(side='left', padx=5)
-        ttk.Button(button_frame, text="Load Settings", command=self.load_settings).pack(side='left', padx=5)
+        ttk.Button(button_frame, text="Load from File", command=self.load_settings).pack(side='left', padx=5)
+        ttk.Button(button_frame, text="Load from Pi", command=self.load_from_pi).pack(side='left', padx=5)
         ttk.Button(button_frame, text="Reset to Default", command=self.reset_settings).pack(side='left', padx=5)
         ttk.Button(button_frame, text="Close", command=self.dialog.destroy).pack(side='right', padx=(5, 0))
     
@@ -448,9 +449,28 @@ class CameraSettingsDialog:
             messagebox.showerror("Error", f"Failed to save settings: {str(e)}")
     
     def load_settings(self):
-        """Load settings from file or from Pi"""
+        """Load settings from JSON file"""
         try:
-            # First try to load from Pi
+            filename = filedialog.askopenfilename(
+                filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+                title="Load Camera Settings from File"
+            )
+            
+            if filename:
+                with open(filename, 'r') as f:
+                    data = json.load(f)
+                    device_settings = data.get(self.device, {})
+                    if device_settings:
+                        self.apply_loaded_settings(device_settings)
+                        messagebox.showinfo("Success", f"Settings loaded from {filename}")
+                    else:
+                        messagebox.showwarning("Warning", f"No settings found for device {self.device} in {filename}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to load settings: {str(e)}")
+    
+    def load_from_pi(self):
+        """Load settings from Pi"""
+        try:
             # URL encode the device path
             import urllib.parse
             encoded_device = urllib.parse.quote(self.device, safe='')
@@ -459,23 +479,15 @@ class CameraSettingsDialog:
             
             if response.status_code == 200:
                 settings = response.json().get('settings', {})
-                self.apply_loaded_settings(settings)
-                return
-            
-            # If no settings on Pi, try to load from file
-            filename = filedialog.askopenfilename(
-                filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
-                title="Load Camera Settings"
-            )
-            
-            if filename:
-                with open(filename, 'r') as f:
-                    data = json.load(f)
-                    device_settings = data.get(self.device, {})
-                    self.apply_loaded_settings(device_settings)
-                    messagebox.showinfo("Success", f"Settings loaded from {filename}")
+                if settings:
+                    self.apply_loaded_settings(settings)
+                    messagebox.showinfo("Success", "Settings loaded from Pi")
+                else:
+                    messagebox.showinfo("Info", "No saved settings found on Pi")
+            else:
+                messagebox.showwarning("Warning", f"No settings found on Pi: {response.text}")
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to load settings: {str(e)}")
+            messagebox.showerror("Error", f"Failed to load settings from Pi: {str(e)}")
     
     def apply_loaded_settings(self, settings):
         """Apply loaded settings to the UI controls"""
