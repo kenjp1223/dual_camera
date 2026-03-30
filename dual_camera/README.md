@@ -287,6 +287,8 @@ The PC GUI provides a comprehensive interface for managing multiple Raspberry Pi
 
 The system includes a sophisticated post-processing interface with manual synchronization and advanced cropping capabilities:
 
+For detailed command-line and GUI usage of the underlying post-processing tool, see `dual_camera/pc/POST_PROCESS_VIDEOS.md` (script: `dual_camera/pc/post_process_videos.py`).
+
 #### **Manual Sync Features**
 - **Frame-by-Frame Synchronization**: Manually align cam0 and cam1 videos frame by frame
 - **Direct Frame Entry**: Enter specific frame numbers for precise synchronization
